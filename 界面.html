@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>牌王 - 三卡对决 | 战术部署界面</title>
+    <style>
+        :root {
+            --bg-color: #050505;
+            --panel-bg: rgba(20, 20, 25, 0.7);
+            --text-main: rgba(255, 255, 255, 0.85);
+            --text-dim: rgba(255, 255, 255, 0.4);
+            --border-color: rgba(255, 255, 255, 0.15);
+            --grid-line: rgba(96, 165, 250, 0.2);
+            --glass-blur: blur(12px);
+            
+            /* 4 种玩家主题色 */
+            --p1-color: #22d3ee; /* 玩家 (青色) */
+            --p2-color: #60a5fa; /* 电脑 1 (蓝色) */
+            --p3-color: #f97316; /* 电脑 2 (橙色) */
+            --p4-color: #a3e635; /* 电脑 3 (绿) */
+
+            --font-main: 'Microsoft YaHei', 'PingFang SC', 'JetBrains Mono', 'Roboto Mono', monospace, sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            background-image: 
+                linear-gradient(var(--grid-line) 1px, transparent 1px),
+                linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+            background-size: 40px 40px;
+            color: var(--text-main);
+            font-family: var(--font-main);
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* --- UI 工具类 --- */
+        .glass-panel {
+            background: var(--panel-bg);
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            border: 1px solid var(--border-color);
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
+        }
+
+        .text-dim { color: var(--text-dim); }
+        .text-p1 { color: var(--p1-color); }
+        .text-p2 { color: var(--p2-color); }
+        .text-p3 { color: var(--p3-color); }
+        .text-p4 { color: var(--p4-color); }
+
+        .label-tech {
+            font-size: 0.7rem;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            color: var(--text-dim);
+            margin-bottom: 8px;
+            display: block;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 4px;
+        }
+
+        /* --- 顶部 Header --- */
+        header {
+            height: 60px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 20px;
+            border-bottom: 1px solid var(--border-color);
+            background: rgba(5, 5, 5, 0.8);
+            z-index: 10;
+        }
+
+        .game-title {
+            font-size: 1.2rem;
+            font-weight: 700;
+            letter-spacing: 2px;
+        }
+
+        .game-info {
+            display: flex;
+            gap: 40px;
+        }
+
+        .info-block {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .info-val {
+            font-size: 1.1rem;
+            font-weight: bold;
+            font-family: 'JetBrains Mono', monospace;
+            white-space: nowrap;
+        }
+
+        /* --- 主舞台 Layout --- */
+        .main-stage {
+            flex: 1;
+            display: grid;
+            grid-template-columns: 280px 1fr 280px;
+            gap: 20px;
+            padding: 20px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* --- 左侧边栏：玩家列表 --- */
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .player-list-item {
+            padding: 12px 15px;
+            border-left: 4px solid var(--text-dim);
+            background: rgba(255,255,255,0.02);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+            height: 50px; /* 固定高度以便计算 */
+        }
+
+        .player-list-item.me {
+            border-left-color: var(--p1-color);
+            background: linear-gradient(90deg, rgba(34, 211, 238, 0.1), transparent);
+        }
+        .player-list-item.p2 { border-left-color: var(--p2-color); }
+        .player-list-item.p3 { border-left-color: var(--p3-color); }
+        .player-list-item.p4 { border-left-color: var(--p4-color); }
+
+        .player-score {
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: bold;
+            font-size: 1rem;
+        }
+
+        /* --- 中央：分组工作台 ( zones) --- */
+        .workbench {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 20px;
+            align-content: start;
+            position: relative;
+        }
+
+        .group-zone {
+            /* 高度高于 4 个玩家卡片 (4 * 50px + gaps ≈ 230px), 设置为 350px 确保足够 */
+            min-height: 350px; 
+            border: 1px solid var(--border-color);
+            background: rgba(255, 255, 255, 0.02);
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            padding: 15px;
+        }
+
+        .group-zone::before {
+            content: attr(data-label);
+            position: absolute;
+            top: -12px;
+            left: 20px;
+            background: var(--bg-color);
+            padding: 0 10px;
+            color: var(--text-main);
+            font-size: 0.8rem;
+            font-weight: bold;
+            border: 1px solid var(--border-color);
+        }
+
+        .zone-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 15px;
+            font-size: 0.7rem;
+            color: var(--text-dim);
+        }
+
+        /* 玩家出牌展示区域 */
+        .zone-rows {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            overflow: hidden;
+        }
+
+        .zone-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 5px;
+            height: 50px; /* 只显示卡牌上半部分的高度 */
+            position: relative;
+            padding-left: 10px;
+            border-left: 2px solid transparent;
+        }
+
+        .zone-row.p1 { border-left-color: var(--p1-color); }
+        .zone-row.p2 { border-left-color: var(--p2-color); }
+        .zone-row.p3 { border-left-color: var(--p3-color); }
+        .zone-row.p4 { border-left-color: var(--p4-color); }
+
+        .zone-row-label {
+            position: absolute;
+            left: -25px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 0.6rem;
+            color: var(--text-dim);
+            width: 20px;
+            text-align: right;
+        }
+
+        /* 卡牌遮罩容器 - 横着对半分 (只显示上半部分) */
+        .card-mask {
+            height: 50px; /* 原高度 100px 的一半 */
+            width: 50px;  /* 稍微缩小宽度以适应多张牌并排 */
+            overflow: hidden;
+            position: relative;
+            border: 1px solid var(--border-color);
+            background: #1a1a1a;
+            border-radius: 2px 2px 0 0; /* 只保留上圆角 */
+            flex-shrink: 0;
+        }
+        
+        .card-mask .card-inner {
+            position: absolute;
+            top: 0;
+            left: 0;
+            /* 原始卡牌比例 70x100, 这里缩放以适应 50px 宽度 */
+            width: 70px; 
+            height: 100px;
+            transform: scale(0.7); /* 缩小以适应遮罩 */
+            transform-origin: top left;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 5px;
+        }
+
+        .card-top {
+            font-size: 0.8rem;
+            font-weight: bold;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            line-height: 1;
+        }
+        .suit-red { color: #ef4444; }
+        .suit-black { color: #e2e8f0; }
+
+        /* --- 右侧边栏：游戏记录 --- */
+        .game-log {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            overflow: hidden;
+        }
+
+        .log-content {
+            flex: 1;
+            overflow-y: auto;
+            font-size: 0.7rem;
+            font-family: 'JetBrains Mono', monospace;
+            padding-right: 5px;
+        }
+
+        .log-entry {
+            margin-bottom: 8px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            color: var(--text-dim);
+        }
+        .log-entry strong { color: var(--text-main); }
+        .log-entry .highlight { color: var(--accent-cyan); }
+
+        .log-content::-webkit-scrollbar { width: 4px; }
+        .log-content::-webkit-scrollbar-thumb { background: var(--border-color); }
+
+        /* --- 底部：玩家手牌 --- */
+        .player-hand-container {
+            height: 200px;
+            border-top: 1px solid var(--border-color);
+            background: rgba(5, 5, 5, 0.95);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+            z-index: 20;
+        }
+
+        .hand-label {
+            position: absolute;
+            top: 10px;
+            left: 20px;
+            font-size: 0.7rem;
+            color: var(--p1-color);
+            letter-spacing: 1px;
+        }
+
+        .cards-rack {
+            display: flex;
+            justify-content: center;
+            gap: -30px;
+            padding: 0 20px;
+            margin-top: 10px;
+        }
+
+        .card {
+            width: 70px;
+            height: 100px;
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 4px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 5px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            position: relative;
+            margin-left: -30px;
+        }
+
+        .card:first-child { margin-left: 0; }
+        
+        .card:hover {
+            transform: translateY(-20px);
+            z-index: 10;
+            border-color: var(--p1-color);
+            box-shadow: 0 0 15px rgba(34, 211, 238, 0.3);
+        }
+
+        .card.selected {
+            border: 2px solid var(--p1-color);
+            box-shadow: 0 0 20px rgba(34, 211, 238, 0.5);
+            transform: translateY(-30px);
+            z-index: 20;
+        }
+
+        .card-center {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 1.5rem;
+        }
+
+        .card-bottom { transform: rotate(180deg); }
+
+        /* --- 操作按钮 (手牌右下角) --- */
+        .action-bar {
+            position: absolute;
+            bottom: 15px;
+            right: 20px;
+            display: flex;
+            gap: 15px;
+        }
+
+        .btn {
+            background: transparent;
+            border: 1px solid var(--p1-color);
+            color: var(--p1-color);
+            padding: 8px 20px;
+            font-family: var(--font-main);
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            letter-spacing: 1px;
+        }
+
+        .btn:hover {
+            background: var(--p1-color);
+            color: #000;
+            box-shadow: 0 0 15px rgba(34, 211, 238, 0.4);
+        }
+
+        .btn-confirm {
+            border-color: var(--text-main);
+            color: var(--text-main);
+        }
+        
+        .btn-confirm:hover {
+            background: var(--text-main);
+            box-shadow: 0 0 15px rgba(255, 255, 255, 0.4);
+        }
+
+        /* --- 装饰网格 --- */
+        .grid-overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            pointer-events: none;
+            z-index: -1;
+            background: 
+                linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+            background-size: 100px 100px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="grid-overlay"></div>
+
+    <header class="glass-panel">
+        <div class="game-title">
+            牌王 <span class="text-p1">// 三卡对决</span>
+        </div>
+        <div class="game-info">
+            <div class="info-block">
+                <span class="label-tech" style="border:none; margin:0;">当前轮次</span>
+                <!-- 修改：03 / 05 (共 5 回合) -->
+                <span class="info-val text-p1">03 / 05 (共 5 回合)</span>
+            </div>
+            <div class="info-block">
+                <span class="label-tech" style="border:none; margin:0;">游戏模式</span>
+                <span class="info-val">标准排位</span>
+            </div>
+        </div>
+        <div style="font-size: 0.8rem; color: var(--text-dim);">
+            系统就绪
+        </div>
+    </header>
+
+    <div class="main-stage">
+        <!-- 左侧边栏：玩家列表 -->
+        <aside class="sidebar">
+            <span class="label-tech">玩家列表</span>
+            
+            <div class="glass-panel player-list-item me">
+                <span>玩家 (我)</span>
+                <span class="player-score text-p1">14</span>
+            </div>
+
+            <div class="glass-panel player-list-item p2">
+                <span>电脑玩家 01</span>
+                <span class="player-score text-p2">12</span>
+            </div>
+
+            <div class="glass-panel player-list-item p3">
+                <span>电脑玩家 02</span>
+                <span class="player-score text-p3">09</span>
+            </div>
+
+            <div class="glass-panel player-list-item p4">
+                <span>电脑玩家 03</span>
+                <span class="player-score text-p4">11</span>
+            </div>
+        </aside>
+
+        <!-- 中央：分组工作台 (展示所有玩家出牌) -->
+        <main class="workbench">
+            
+            <!-- A 区：单张 -->
+            <div class="group-zone" data-label="A 区：单张比大小">
+                <div class="zone-header">
+                    <span>规则：点数优先</span>
+                    <span class="text-p1">权重：1x</span>
+                </div>
+                <div class="zone-rows">
+                    <!-- 玩家 1 -->
+                    <div class="zone-row p1">
+                        <span class="zone-row-label">P1</span>
+                        <div class="card-mask">
+                            <div class="card-inner">
+                                <div class="card-top suit-black"><span>A</span><span>♠</span></div>
+                                <div class="card-center suit-black">♠</div>
+                                <div class="card-bottom suit-black"><span>A</span><span>♠</span></div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- 玩家 2 -->
+                    <div class="zone-row p2">
+                        <span class="zone-row-label">P2</span>
+                        <div class="card-mask">
+                            <div class="card-inner">
+                                <div class="card-top suit-red"><span>K</span><span>♥</span></div>
+                                <div class="card-center suit-red">♥</div>
+                                <div class="card-bottom suit-red"><span>K</span><span>♥</span></div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- 玩家 3 -->
+                    <div class="zone-row p3">
+                        <span class="zone-row-label">P3</span>
+                        <div class="card-mask">
+                            <div class="card-inner">
+                                <div class="card-top suit-black"><span>Q</span><span>♣</span></div>
+                                <div class="card-center suit-black">♣</div>
+                                <div class="card-bottom suit-black"><span>Q</span><span>♣</span></div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- 玩家 4 -->
+                    <div class="zone-row p4">
+                        <span class="zone-row-label">P4</span>
+                        <div class="card-mask">
+                            <div class="card-inner">
+                                <div class="card-top suit-red"><span>J</span><span>♦</span></div>
+                                <div class="card-center suit-red">♦</div>
+                                <div class="card-bottom suit-red"><span>J</span><span>♦</span></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- B 区：24 点和 -->
+            <div class="group-zone" data-label="B 区：24 点和">
+                <div class="zone-header">
+                    <span>规则：总和优先</span>
+                    <span class="text-p1">权重：1x</span>
+                </div>
+                <div class="zone-rows">
+                    <!-- 玩家 1 -->
+                    <div class="zone-row p1">
+                        <span class="zone-row-label">P1</span>
+                        <div class="card-mask">
+                            <div class="card-inner" style="display:flex; gap:2px;">
+                                <div class="card-top suit-red"><span>10</span><span>♥</span></div>
+                                <div class="card-top suit-black"><span>J</span><span>♣</span></div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- 玩家 2 -->
+                    <div class="zone-row p2">
+                        <span class="zone-row-label">P2</span>
+                        <div class="card-mask">
+                            <div class="card-inner" style="display:flex; gap:2px;">
+                                <div class="card-top suit-black"><span>9</span><span>♠</span></div>
+                                <div class="card-top suit-red"><span>9</span><span>♦</span></div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- 玩家 3 -->
+                    <div class="zone-row p3">
+                        <span class="zone-row-label">P3</span>
+                        <div class="card-mask">
+                            <div class="card-inner" style="display:flex; gap:2px;">
+                                <div class="card-top suit-red"><span>Q</span><span>♥</span></div>
+                                <div class="card-top suit-black"><span>8</span><span>♣</span></div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- 玩家 4 -->
+                    <div class="zone-row p4">
+                        <span class="zone-row-label">P4</span>
+                        <div class="card-mask">
+                            <div class="card-inner" style="display:flex; gap:2px;">
+                                <div class="card-top suit-black"><span>K</span><span>♠</span></div>
+                                <div class="card-top suit-red"><span>7</span><span>♥</span></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- C 区：比三张 -->
+            <div class="group-zone" data-label="C 区：比三张">
+                <div class="zone-header">
+                    <span>规则：牌型优先</span>
+                    <span class="text-p1" style="color:var(--accent-orange)">权重：2x</span>
+                </div>
+                <div class="zone-rows">
+                    <!-- 玩家 1 (空) -->
+                    <div class="zone-row p1">
+                        <span class="zone-row-label">P1</span>
+                        <div style="font-size:0.6rem; color:var(--text-dim); align-self:center;">待出牌</div>
+                    </div>
+                    <!-- 玩家 2 -->
+                    <div class="zone-row p2">
+                        <span class="zone-row-label">P2</span>
+                        <div class="card-mask">
+                            <div class="card-inner" style="display:flex; gap:2px;">
+                                <div class="card-top suit-black"><span>5</span><span>♠</span></div>
+                                <div class="card-top suit-black"><span>5</span><span>♣</span></div>
+                                <div class="card-top suit-black"><span>5</span><span>♦</span></div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- 玩家 3 -->
+                    <div class="zone-row p3">
+                        <span class="zone-row-label">P3</span>
+                        <div class="card-mask">
+                            <div class="card-inner" style="display:flex; gap:2px;">
+                                <div class="card-top suit-red"><span>2</span><span>♥</span></div>
+                                <div class="card-top suit-red"><span>3</span><span>♥</span></div>
+                                <div class="card-top suit-red"><span>4</span><span>♥</span></div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- 玩家 4 -->
+                    <div class="zone-row p4">
+                        <span class="zone-row-label">P4</span>
+                        <div class="card-mask">
+                            <div class="card-inner" style="display:flex; gap:2px;">
+                                <div class="card-top suit-black"><span>10</span><span>♣</span></div>
+                                <div class="card-top suit-black"><span>J</span><span>♣</span></div>
+                                <div class="card-top suit-black"><span>Q</span><span>♣</span></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </main>
+
+        <!-- 右侧边栏：游戏记录 -->
+        <aside class="sidebar game-log">
+            <span class="label-tech">游戏记录</span>
+            <div class="glass-panel log-content">
+                <div class="log-entry">
+                    [Round 03] 开始分组阶段...
+                </div>
+                <div class="log-entry">
+                    [Round 02] 结算完成。<br>
+                    <strong>玩家</strong> 获得 <span class="highlight">+5</span> 分<br>
+                    <strong>P2</strong> 获得 <span class="highlight">+3</span> 分
+                </div>
+                <div class="log-entry">
+                    [Round 02] C 区结算：P2 豹子胜出 (权重 2x)
+                </div>
+                <div class="log-entry">
+                    [Round 01] 结算完成。<br>
+                    <strong>玩家</strong> 获得 <span class="highlight">+4</span> 分
+                </div>
+                <div class="log-entry">
+                    [System] 游戏初始化完成。<br>
+                    玩家数：4 | 轮数：5
+                </div>
+            </div>
+        </aside>
+
+    </div>
+
+    <!-- 底部：玩家手牌 -->
+    <div class="player-hand-container glass-panel">
+        <div class="hand-label">
+            玩家手牌 // 剩余 9 张 // 点击卡牌分配至区域
+        </div>
+        
+        <div class="cards-rack">
+            <!-- 卡牌 1 -->
+            <div class="card selected">
+                <div class="card-top suit-black"><span>K</span><span>♠</span></div>
+                <div class="card-center suit-black">♠</div>
+                <div class="card-bottom suit-black"><span>K</span><span>♠</span></div>
+            </div>
+            <!-- 卡牌 2 -->
+            <div class="card">
+                <div class="card-top suit-red"><span>9</span><span>♦</span></div>
+                <div class="card-center suit-red">♦</div>
+                <div class="card-bottom suit-red"><span>9</span><span>♦</span></div>
+            </div>
+            <!-- 卡牌 3 -->
+            <div class="card">
+                <div class="card-top suit-black"><span>5</span><span>♣</span></div>
+                <div class="card-center suit-black">♣</div>
+                <div class="card-bottom suit-black"><span>5</span><span>♣</span></div>
+            </div>
+            <!-- 卡牌 4 -->
+            <div class="card">
+                <div class="card-top suit-red"><span>Q</span><span>♥</span></div>
+                <div class="card-center suit-red">♥</div>
+                <div class="card-bottom suit-red"><span>Q</span><span>♥</span></div>
+            </div>
+            <!-- 卡牌 5 -->
+            <div class="card">
+                <div class="card-top suit-black"><span>2</span><span>♠</span></div>
+                <div class="card-center suit-black">♠</div>
+                <div class="card-bottom suit-black"><span>2</span><span>♠</span></div>
+            </div>
+            <!-- 卡牌 6 -->
+            <div class="card">
+                <div class="card-top suit-red"><span>7</span><span>♦</span></div>
+                <div class="card-center suit-red">♦</div>
+                <div class="card-bottom suit-red"><span>7</span><span>♦</span></div>
+            </div>
+            <!-- 卡牌 7 -->
+            <div class="card">
+                <div class="card-top suit-black"><span>8</span><span>♣</span></div>
+                <div class="card-center suit-black">♣</div>
+                <div class="card-bottom suit-black"><span>8</span><span>♣</span></div>
+            </div>
+            <!-- 卡牌 8 -->
+            <div class="card">
+                <div class="card-top suit-red"><span>4</span><span>♥</span></div>
+                <div class="card-center suit-red">♥</div>
+                <div class="card-bottom suit-red"><span>4</span><span>♥</span></div>
+            </div>
+            <!-- 卡牌 9 -->
+            <div class="card">
+                <div class="card-top suit-black"><span>J</span><span>♠</span></div>
+                <div class="card-center suit-black">♠</div>
+                <div class="card-bottom suit-black"><span>J</span><span>♠</span></div>
+            </div>
+        </div>
+
+        <!-- 操作按钮 (移至手牌容器内右下角) -->
+        <div class="action-bar">
+            <button class="btn">重置手牌</button>
+            <button class="btn btn-confirm">确认分组</button>
+        </div>
+    </div>
+
+</body>
+</html>
