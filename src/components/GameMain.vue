@@ -11,6 +11,10 @@
           <span class="rules-icon">?</span>
           <span class="rules-text">规则说明</span>
         </button>
+        <button class="rules-btn" @click="showSettings = true">
+          <span class="rules-icon">⚙</span>
+          <span class="rules-text">游戏设置</span>
+        </button>
       </div>
       
       <div class="header-center">
@@ -342,6 +346,84 @@
         </div>
       </div>
     </div>
+
+    <div class="rules-modal" v-if="showSettings" @click.self="showSettings = false">
+      <div class="rules-content">
+        <div class="rules-header">
+          <h2>游戏设置</h2>
+          <button class="rules-close" @click="showSettings = false">×</button>
+        </div>
+        <div class="rules-body">
+          <div class="settings-group">
+            <div class="settings-label">
+              <span class="label-dot"></span>
+              电脑玩家数量
+            </div>
+            <div class="slider-wrapper">
+              <input 
+                type="range" 
+                v-model="settingsCpuCount" 
+                min="1" 
+                max="3" 
+                class="slider"
+                @change="updateSettingsCpuCount"
+              />
+              <div class="slider-marks">
+                <span>1</span><span>2</span><span>3</span>
+              </div>
+            </div>
+            <div class="settings-value">{{ settingsCpuCount }} 人</div>
+          </div>
+          
+          <div class="settings-group">
+            <div class="settings-label">
+              <span class="label-dot"></span>
+              游戏轮数
+            </div>
+            <div class="slider-wrapper">
+              <input 
+                type="range" 
+                v-model="settingsRoundCount" 
+                min="3" 
+                max="7" 
+                class="slider"
+                @change="updateSettingsRoundCount"
+              />
+              <div class="slider-marks">
+                <span>3</span><span>5</span><span>7</span>
+              </div>
+            </div>
+            <div class="settings-value">{{ settingsRoundCount }} 轮</div>
+          </div>
+          
+          <div class="settings-group">
+            <div class="settings-label">
+              <span class="label-dot"></span>
+              排序方式
+            </div>
+            <div class="sort-toggle">
+              <button 
+                class="sort-btn" 
+                :class="{ active: sortMode === 'rank' }"
+                @click="sortMode = 'rank'"
+              >
+                先点数后花色
+              </button>
+              <button 
+                class="sort-btn" 
+                :class="{ active: sortMode === 'suit' }"
+                @click="sortMode = 'suit'"
+              >
+                先花色后点数
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="settings-footer">
+          <button class="btn-confirm" @click="confirmSettings">确认</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -357,6 +439,25 @@ export default {
     const draggingIndex = ref(null)
     const sortMode = ref('rank')
     const showRules = ref(false)
+    const showSettings = ref(true)
+    const settingsCpuCount = ref(1)
+    const settingsRoundCount = ref(5)
+    
+    const updateSettingsCpuCount = () => {
+      gameStore.playerCount = Number(settingsCpuCount.value) + 1
+    }
+
+    const updateSettingsRoundCount = () => {
+      gameStore.totalRounds = Number(settingsRoundCount.value)
+    }
+
+    const confirmSettings = () => {
+      gameStore.playerCount = Number(settingsCpuCount.value) + 1
+      gameStore.totalRounds = Number(settingsRoundCount.value)
+      gameStore.initGame(Number(settingsCpuCount.value) + 1, Number(settingsRoundCount.value))
+      gameStore.startNewRound()
+      showSettings.value = false
+    }
     
     const playerHand = computed(() => {
       const player = gameStore.players.find(p => p.id === 'player')
@@ -675,6 +776,12 @@ export default {
       selectedCardIndex,
       draggingIndex,
       showRules,
+      showSettings,
+      settingsCpuCount,
+      settingsRoundCount,
+      updateSettingsCpuCount,
+      updateSettingsRoundCount,
+      confirmSettings,
       getGroupStatus,
       getPlayerGroupCards,
       getDisplayCards,
@@ -1440,5 +1547,134 @@ export default {
   border-radius: 4px;
   color: rgba(255, 255, 255, 0.85);
   font-weight: 500;
+}
+
+.settings-group {
+  margin-bottom: 28px;
+}
+
+.settings-group:last-child {
+  margin-bottom: 0;
+}
+
+.settings-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.55);
+  margin-bottom: 14px;
+  letter-spacing: 1px;
+}
+
+.settings-label .label-dot {
+  width: 6px;
+  height: 6px;
+  background: #2563eb;
+  border-radius: 50%;
+}
+
+.slider-wrapper {
+  padding: 0 2px;
+}
+
+.settings-group .slider {
+  width: 100%;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+.settings-group .slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  background: #2563eb;
+  border-radius: 2px;
+  cursor: pointer;
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.4);
+  transition: transform 0.15s;
+}
+
+.settings-group .slider::-webkit-slider-thumb:hover {
+  transform: scale(1.1);
+}
+
+.slider-marks {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.settings-value {
+  text-align: center;
+  font-size: 24px;
+  font-weight: 300;
+  color: #2563eb;
+  margin-top: 12px;
+  letter-spacing: 2px;
+}
+
+.sort-toggle {
+  display: flex;
+  gap: 12px;
+}
+
+.sort-btn {
+  flex: 1;
+  padding: 10px 16px;
+  font-size: 12px;
+  font-family: inherit;
+  letter-spacing: 1px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.sort-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.sort-btn.active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #0a0a0c;
+  font-weight: 600;
+}
+
+.settings-footer {
+  padding: 16px 24px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.btn-confirm {
+  padding: 10px 24px;
+  font-size: 13px;
+  font-family: inherit;
+  letter-spacing: 1px;
+  background: #2563eb;
+  border: none;
+  border-radius: 6px;
+  color: #0a0a0c;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-confirm:hover {
+  background: #3b82f6;
+  box-shadow: 0 0 15px rgba(59, 130, 246, 0.4);
 }
 </style>
