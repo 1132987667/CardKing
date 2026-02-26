@@ -325,4 +325,161 @@ export default {
   background: #06b6d4;
   border-color: #06b6d4;
 }
+
+@media (max-width: 768px) {
+  .result {
+    padding: 16px;
+    align-items: flex-start;
+    padding-top: 15vh;
+  }
+
+  .panel {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .panel-header {
+    padding: 16px 20px;
+  }
+
+  .panel-title {
+    font-size: 16px;
+  }
+
+  .panel-body {
+    padding: 20px;
+  }
+
+  .panel-footer {
+    padding: 16px 20px;
+  }
+
+  .score-item {
+    padding: 14px;
+  }
+
+  .score-name {
+    font-size: 14px;
+  }
+
+  .score-total {
+    font-size: 12px;
+  }
+
+  .score-change {
+    font-size: 22px;
+  }
+
+  .winner-block {
+    padding: 20px;
+  }
+
+  .winner-label {
+    font-size: 12px;
+  }
+
+  .winner-name {
+    font-size: 22px;
+  }
+
+  .winner-score {
+    font-size: 15px;
+  }
+
+  .rankings-title {
+    font-size: 12px;
+  }
+
+  .ranking-item {
+    padding: 14px;
+  }
+
+  .rank-num {
+    width: 32px;
+    height: 32px;
+    font-size: 14px;
+  }
+
+  .rank-name {
+    font-size: 14px;
+  }
+
+  .rank-score {
+    font-size: 15px;
+  }
+
+  .btn {
+    padding: 16px 32px;
+    font-size: 14px;
+    min-height: 52px;
+  }
+}
+
+@media (max-width: 480px) {
+  .result {
+    padding: 12px;
+    padding-top: 10vh;
+  }
+
+  .panel-header {
+    padding: 14px 16px;
+  }
+
+  .panel-title {
+    font-size: 15px;
+  }
+
+  .panel-body {
+    padding: 16px;
+  }
+
+  .score-item {
+    padding: 12px;
+  }
+
+  .score-change {
+    font-size: 20px;
+  }
+
+  .winner-block {
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+
+  .winner-name {
+    font-size: 20px;
+  }
+
+  .ranking-item {
+    padding: 12px;
+  }
+
+  .rank-num {
+    width: 28px;
+    height: 28px;
+    font-size: 12px;
+    margin-right: 10px;
+  }
+
+  .btn {
+    padding: 18px 28px;
+    font-size: 15px;
+    min-height: 56px;
+  }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .btn {
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  .btn:active {
+    transform: scale(0.98);
+  }
+
+  .btn-highlight:active {
+    background: #1d4ed8;
+  }
+}
 </style>

@@ -520,4 +520,145 @@ export default {
     font-size: 1rem;
   }
 }
+
+@media (max-width: 768px) {
+  .menu {
+    padding: 16px;
+    align-items: flex-start;
+    padding-top: 15vh;
+  }
+
+  .panel {
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+  }
+
+  .panel-header {
+    padding: 16px 20px;
+  }
+
+  .logo-icon {
+    font-size: 24px;
+  }
+
+  .logo-text {
+    font-size: 18px;
+    letter-spacing: 3px;
+  }
+
+  .version {
+    font-size: 12px;
+  }
+
+  .panel-body {
+    padding: 24px 20px;
+  }
+
+  .config-group {
+    margin-bottom: 24px;
+  }
+
+  .config-label {
+    font-size: 13px;
+    margin-bottom: 16px;
+  }
+
+  .label-dot {
+    width: 8px;
+    height: 8px;
+  }
+
+  .slider {
+    height: 6px;
+  }
+
+  .slider::-webkit-slider-thumb {
+    width: 24px;
+    height: 24px;
+  }
+
+  .slider-marks {
+    font-size: 12px;
+    margin-top: 10px;
+  }
+
+  .config-value {
+    font-size: 28px;
+    margin-top: 16px;
+  }
+
+  .panel-footer {
+    flex-direction: column;
+    gap: 12px;
+    padding: 20px;
+  }
+
+  .btn {
+    padding: 16px 20px;
+    font-size: 14px;
+    letter-spacing: 3px;
+    min-height: 52px;
+  }
+}
+
+@media (max-width: 480px) {
+  .menu {
+    padding: 12px;
+    padding-top: 10vh;
+  }
+
+  .panel-header {
+    padding: 14px 16px;
+  }
+
+  .logo-text {
+    font-size: 16px;
+  }
+
+  .panel-body {
+    padding: 20px 16px;
+  }
+
+  .config-value {
+    font-size: 24px;
+  }
+
+  .panel-footer {
+    padding: 16px;
+  }
+
+  .btn {
+    padding: 18px 20px;
+    font-size: 15px;
+    min-height: 56px;
+  }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .slider::-webkit-slider-thumb {
+    width: 28px;
+    height: 28px;
+  }
+
+  .btn {
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  .btn:active {
+    transform: scale(0.98);
+  }
+
+  .btn-primary:active {
+    background: #1d4ed8;
+    box-shadow: 0 0 30px rgba(59, 130, 246, 0.6);
+  }
+
+  .btn-secondary:active {
+    color: rgba(255, 255, 255, 0.95);
+    border-color: rgba(255, 255, 255, 0.4);
+    background: rgba(255, 255, 255, 0.05);
+  }
+}
 </style>

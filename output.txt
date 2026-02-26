@@ -1,0 +1,5454 @@
+项目文件夹架构:
+CardKing/
+.trae/
+    scripts/
+        dump_project.py
+src/
+    components/
+        GameMain.vue
+        MainMenu.vue
+        ResultDisplay.vue
+    store/
+        gameStore.js
+    utils/
+        AIPlayer.js
+        Card.js
+        constants.js
+        Deck.js
+        RuleEvaluator.js
+    App.vue
+    main.js
+    style.css
+.gitattributes
+.gitignore
+index.html
+package-lock.json
+package.json
+project_rules.md
+vite.config.js
+游戏需求规格说明书.txt
+
+============================================================
+文件内容:
+
+--- .gitattributes ---
+# Auto detect text files and perform LF normalization
+* text=auto
+
+--- .gitignore ---
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+.git/
+
+界面.html
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+--- .trae/scripts/dump_project.py ---
+#!/usr/bin/env python3
+"""
+dump_project.py - 抽取项目文件夹架构和所有文件内容。
+支持忽略规则（类似 .gitignore）。
+"""
+
+import os
+import sys
+import argparse
+import fnmatch
+from pathlib import Path
+
+# 尝试导入 pathspec（推荐，但非必需）
+try:
+    from pathspec import PathSpec
+    from pathspec.patterns import GitWildMatchPattern
+    HAS_PATHSPEC = True
+except ImportError:
+    HAS_PATHSPEC = False
+
+
+class SimpleIgnoreMatcher:
+    """简单的忽略规则匹配器（不支持 ** 和否定模式）"""
+
+    def __init__(self, lines):
+        self.patterns = []  # 每个元素为 (pattern, dir_only)
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            if line.startswith('!'):
+                # 忽略否定模式（简单版本不支持）
+                continue
+            dir_only = line.endswith('/')
+            if dir_only:
+                line = line[:-1]
+            self.patterns.append((line, dir_only))
+
+    def match(self, rel_path, is_dir=False):
+        """
+        rel_path: 相对于根目录的路径（使用正斜杠）
+        is_dir  : 是否为目录
+        返回 True 表示应忽略
+        """
+        for pattern, dir_only in self.patterns:
+            if dir_only and not is_dir:
+                continue
+            # 处理以 / 开头的模式（锚定到根目录）
+            if pattern.startswith('/'):
+                p = pattern[1:]
+                if fnmatch.fnmatch(rel_path, p):
+                    return True
+            elif '/' in pattern:
+                # 模式包含 /，匹配完整路径
+                if fnmatch.fnmatch(rel_path, pattern):
+                    return True
+            else:
+                # 模式不含 /，仅匹配文件名部分
+                basename = os.path.basename(rel_path)
+                if fnmatch.fnmatch(basename, pattern):
+                    return True
+        return False
+
+
+def load_ignore_matcher(ignore_file):
+    """加载忽略规则，返回匹配器对象"""
+    if not os.path.isfile(ignore_file):
+        return None
+    with open(ignore_file, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+    if HAS_PATHSPEC:
+        # 使用 pathspec 库精确解析 gitignore 规则
+        return PathSpec.from_lines(GitWildMatchPattern, lines)
+    else:
+        return SimpleIgnoreMatcher(lines)
+
+
+def should_ignore(matcher, rel_path, is_dir=False):
+    """判断相对路径是否应忽略"""
+    if matcher is None:
+        return False
+    if HAS_PATHSPEC:
+        # pathspec 需要为目录添加尾部斜杠，以便匹配以 '/' 结尾的模式
+        match_path = rel_path + '/' if is_dir else rel_path
+        return matcher.match_file(match_path)
+    else:
+        return matcher.match(rel_path, is_dir)
+
+
+def build_tree(root_path, rel_path, matcher, follow_links, file_paths):
+    """
+    递归构建目录树，并收集所有应包含的文件路径。
+    返回树节点列表，每个节点为 (type, name, [children])。
+    """
+    full_path = os.path.join(root_path, rel_path) if rel_path else root_path
+    entries = []
+    try:
+        with os.scandir(full_path) as it:
+            for entry in it:
+                name = entry.name
+                if rel_path:
+                    rel_entry = os.path.join(rel_path, name).replace(os.sep, '/')
+                else:
+                    rel_entry = name
+
+                if entry.is_dir(follow_symlinks=follow_links):
+                    if should_ignore(matcher, rel_entry, is_dir=True):
+                        continue
+                    sub_tree = build_tree(root_path, rel_entry, matcher,
+                                          follow_links, file_paths)
+                    entries.append(('dir', name, sub_tree))
+                else:
+                    if should_ignore(matcher, rel_entry, is_dir=False):
+                        continue
+                    entries.append(('file', name))
+                    file_paths.append(rel_entry)
+    except PermissionError:
+        entries.append(('error', '权限不足无法访问', None))
+    except OSError as e:
+        entries.append(('error', f'访问错误: {e}', None))
+
+    # 排序：目录在前，文件在后，均按名称不区分大小写排序
+    entries.sort(key=lambda x: (x[0] != 'dir', x[1].lower()))
+    return entries
+
+
+def generate_tree(start_path, matcher, follow_links=False):
+    """生成树形文本行列表和文件相对路径列表"""
+    start_path = os.path.abspath(start_path)
+    root_name = os.path.basename(start_path) or start_path
+
+    file_paths = []
+    tree_data = build_tree(start_path, '', matcher, follow_links, file_paths)
+
+    # 将树数据转换为文本行
+    tree_lines = []
+
+    def _print_tree(data, indent=''):
+        for entry in data:
+            if entry[0] == 'dir':
+                tree_lines.append(f"{indent}{entry[1]}/")
+                _print_tree(entry[2], indent + '    ')
+            elif entry[0] == 'file':
+                tree_lines.append(f"{indent}{entry[1]}")
+            else:
+                tree_lines.append(f"{indent}<{entry[1]}>")
+
+    _print_tree(tree_data)
+    tree_lines.insert(0, f"{root_name}/")
+    return tree_lines, file_paths
+
+
+def read_file_content(rel_path, root):
+    """尝试以 UTF-8 读取文件内容，失败时返回 None 表示二进制文件"""
+    full_path = os.path.join(root, rel_path)
+    try:
+        with open(full_path, 'r', encoding='utf-8') as f:
+            return f.read()
+    except UnicodeDecodeError:
+        return None
+    except Exception as e:
+        return f"<读取文件时出错: {e}>"
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="抽取项目文件夹架构和文件内容（支持忽略规则）")
+    parser.add_argument('path', nargs='?', default='.',
+                        help="项目根目录 (默认当前目录)")
+    parser.add_argument('-o', '--output', help="输出文件路径 (默认输出到控制台)")
+    parser.add_argument('-i', '--ignore-file',
+                        help="忽略文件路径 (默认在根目录下查找 .gitignore)")
+    parser.add_argument('--no-ignore', action='store_true',
+                        help="不使用任何忽略文件")
+    parser.add_argument('--follow-links', action='store_true',
+                        help="跟随符号链接")
+    args = parser.parse_args()
+
+    root = os.path.abspath(args.path)
+    if not os.path.isdir(root):
+        print(f"错误: {root} 不是有效的目录", file=sys.stderr)
+        sys.exit(1)
+
+    matcher = None
+    if not args.no_ignore:
+        ignore_file = args.ignore_file
+        if ignore_file is None:
+            # 默认查找根目录下的 .gitignore
+            gitignore = os.path.join(root, '.gitignore')
+            if os.path.isfile(gitignore):
+                ignore_file = gitignore
+        if ignore_file and os.path.isfile(ignore_file):
+            matcher = load_ignore_matcher(ignore_file)
+            if matcher is None:
+                print(f"警告: 忽略文件 {ignore_file} 为空或无法加载",
+                      file=sys.stderr)
+        elif ignore_file:
+            print(f"警告: 忽略文件 {ignore_file} 不存在", file=sys.stderr)
+
+    if not HAS_PATHSPEC and matcher is not None:
+        print("提示: 未安装 pathspec 库，将使用内置简单匹配器（不支持 ** 和否定模式）",
+              file=sys.stderr)
+
+    print(f"正在处理目录: {root}", file=sys.stderr)
+
+    tree_lines, file_paths = generate_tree(root, matcher, args.follow_links)
+
+    # 构建输出内容
+    output_lines = []
+    output_lines.append("项目文件夹架构:")
+    output_lines.extend(tree_lines)
+    output_lines.append("\n" + "=" * 60)
+    output_lines.append("文件内容:")
+    output_lines.append("")
+
+    for rel_path in file_paths:
+        output_lines.append(f"--- {rel_path} ---")
+        content = read_file_content(rel_path, root)
+        if content is None:
+            output_lines.append("<二进制文件，内容未显示>")
+        else:
+            output_lines.append(content.rstrip())
+        output_lines.append("")  # 空行分隔
+
+    output_text = "\n".join(output_lines)
+
+    if args.output:
+        with open(args.output, 'w', encoding='utf-8') as f:
+            f.write(output_text)
+        print(f"输出已写入 {args.output}", file=sys.stderr)
+    else:
+        print(output_text)
+
+
+if __name__ == '__main__':
+    main()
+
+--- index.html ---
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>三卡对决 - Card King</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
+
+--- package-lock.json ---
+{
+  "name": "card-king",
+  "version": "1.0.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "card-king",
+      "version": "1.0.0",
+      "dependencies": {
+        "vue": "^3.4.0"
+      },
+      "devDependencies": {
+        "@vitejs/plugin-vue": "^5.0.0",
+        "vite": "^5.0.0"
+      }
+    },
+    "node_modules/@babel/helper-string-parser": {
+      "version": "7.27.1",
+      "resolved": "https://registry.npmmirror.com/@babel/helper-string-parser/-/helper-string-parser-7.27.1.tgz",
+      "integrity": "sha512-qMlSxKbpRlAridDExk92nSobyDdpPijUq2DW6oDnUqd0iOGxmQjyqhMIihI9+zv4LPyZdRje2cavWPbCbWm3eA==",
+      "license": "MIT",
+      "engines": {
+        "node": ">=6.9.0"
+      }
+    },
+    "node_modules/@babel/helper-validator-identifier": {
+      "version": "7.28.5",
+      "resolved": "https://registry.npmmirror.com/@babel/helper-validator-identifier/-/helper-validator-identifier-7.28.5.tgz",
+      "integrity": "sha512-qSs4ifwzKJSV39ucNjsvc6WVHs6b7S03sOh2OcHF9UHfVPqWWALUsNUVzhSBiItjRZoLHx7nIarVjqKVusUZ1Q==",
+      "license": "MIT",
+      "engines": {
+        "node": ">=6.9.0"
+      }
+    },
+    "node_modules/@babel/parser": {
+      "version": "7.29.0",
+      "resolved": "https://registry.npmmirror.com/@babel/parser/-/parser-7.29.0.tgz",
+      "integrity": "sha512-IyDgFV5GeDUVX4YdF/3CPULtVGSXXMLh1xVIgdCgxApktqnQV0r7/8Nqthg+8YLGaAtdyIlo2qIdZrbCv4+7ww==",
+      "license": "MIT",
+      "dependencies": {
+        "@babel/types": "^7.29.0"
+      },
+      "bin": {
+        "parser": "bin/babel-parser.js"
+      },
+      "engines": {
+        "node": ">=6.0.0"
+      }
+    },
+    "node_modules/@babel/types": {
+      "version": "7.29.0",
+      "resolved": "https://registry.npmmirror.com/@babel/types/-/types-7.29.0.tgz",
+      "integrity": "sha512-LwdZHpScM4Qz8Xw2iKSzS+cfglZzJGvofQICy7W7v4caru4EaAmyUuO6BGrbyQ2mYV11W0U8j5mBhd14dd3B0A==",
+      "license": "MIT",
+      "dependencies": {
+        "@babel/helper-string-parser": "^7.27.1",
+        "@babel/helper-validator-identifier": "^7.28.5"
+      },
+      "engines": {
+        "node": ">=6.9.0"
+      }
+    },
+    "node_modules/@esbuild/aix-ppc64": {
+      "version": "0.21.5",
+      "resolved": "https://registry.npmmirror.com/@esbuild/aix-ppc64/-/aix-ppc64-0.21.5.tgz",
+      "integrity": "sha512-1SDgH6ZSPTlggy1yI6+Dbkiz8xzpHJEVAlF/AM1tHPLsf5STom9rwtjE4hKAF20FfXXNTFqEYXyJNWh1GiZedQ==",
+      "cpu": [
+        "ppc64"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "aix"
+      ],
+      "engines": {
+        "node": ">=12"
+      }
+    },
+    "node_modules/@esbuild/android-arm": {
+      "version": "0.21.5",
+      "resolved": "https://registry.npmmirror.com/@esbuild/android-arm/-/android-arm-0.21.5.tgz",
+      "integrity": "sha512-vCPvzSjpPHEi1siZdlvAlsPxXl7WbOVUBBAowWug4rJHb68Ox8KualB+1ocNvT5fjv6wpkX6o/iEpbDrf68zcg==",
+      "cpu": [
+        "arm"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "android"
+      ],
+      "engines": {
+        "node": ">=12"
+      }
+    },
+    "node_modules/@esbuild/android-arm64": {
+      "version": "0.21.5",
+      "resolved": "https://registry.npmmirror.com/@esbuild/android-arm64/-/android-arm64-0.21.5.tgz",
+      "integrity": "sha512-c0uX9VAUBQ7dTDCjq+wdyGLowMdtR/GoC2U5IYk/7D1H1JYC0qseD7+11iMP2mRLN9RcCMRcjC4YMclCzGwS/A==",
+      "cpu": [
+        "arm64"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "android"
+      ],
+      "engines": {
+        "node": ">=12"
+      }
+    },
+    "node_modules/@esbuild/android-x64": {
+      "version": "0.21.5",
+      "resolved": "https://registry.npmmirror.com/@esbuild/android-x64/-/android-x64-0.21.5.tgz",
+      "integrity": "sha512-D7aPRUUNHRBwHxzxRvp856rjUHRFW1SdQATKXH2hqA0kAZb1hKmi02OpYRacl0TxIGz/ZmXWlbZgjwWYaCakTA==",
+      "cpu": [
+        "x64"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "android"
+      ],
+      "engines": {
+        "node": ">=12"
+      }
+    },
+    "node_modules/@esbuild/darwin-arm64": {
+      "version": "0.21.5",
+      "resolved": "https://registry.npmmirror.com/@esbuild/darwin-arm64/-/darwin-arm64-0.21.5.tgz",
+      "integrity": "sha512-DwqXqZyuk5AiWWf3UfLiRDJ5EDd49zg6O9wclZ7kUMv2WRFr4HKjXp/5t8JZ11QbQfUS6/cRCKGwYhtNAY88kQ==",
+      "cpu": [
+        "arm64"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "darwin"
+      ],
+      "engines": {
+        "node": ">=12"
+      }
+    },
+    "node_modules/@esbuild/darwin-x64": {
+      "version": "0.21.5",
+      "resolved": "https://registry.npmmirror.com/@esbuild/darwin-x64/-/darwin-x64-0.21.5.tgz",
+      "integrity": "sha512-se/JjF8NlmKVG4kNIuyWMV/22ZaerB+qaSi5MdrXtd6R08kvs2qCN4C09miupktDitvh8jRFflwGFBQcxZRjbw==",
+      "cpu": [
+        "x64"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "darwin"
+      ],
+      "engines": {
+        "node": ">=12"
+      }
+    },
+    "node_modules/@esbuild/freebsd-arm64": {
+      "version": "0.21.5",
+      "resolved": "https://registry.npmmirror.com/@esbuild/freebsd-arm64/-/freebsd-arm64-0.21.5.tgz",
+      "integrity": "sha512-5JcRxxRDUJLX8JXp/wcBCy3pENnCgBR9bN6JsY4OmhfUtIHe3ZW0mawA7+RDAcMLrMIZaf03NlQiX9DGyB8h4g==",
+      "cpu": [
+        "arm64"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "freebsd"
+      ],
+      "engines": {
+        "node": ">=12"
+      }
+    },
+    "node_modules/@esbuild/freebsd-x64": {
+      "version": "0.21.5",
+      "resolved": "https://registry.npmmirror.com/@esbuild/freebsd-x64/-/freebsd-x64-0.21.5.tgz",
+      "integrity": "sha512-J95kNBj1zkbMXtHVH29bBriQygMXqoVQOQYA+ISs0/2l3T9/kj42ow2mpqerRBxDJnmkUDCaQT/dfNXWX/ZZCQ==",
+      "cpu": [
+        "x64"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "freebsd"
+      ],
+      "engines": {
+        "node": ">=12"
+      }
+    },
+    "node_modules/@esbuild/linux-arm": {
+      "version": "0.21.5",
+      "resolved": "https://registry.npmmirror.com/@esbuild/linux-arm/-/linux-arm-0.21.5.tgz",
+      "integrity": "sha512-bPb5AHZtbeNGjCKVZ9UGqGwo8EUu4cLq68E95A53KlxAPRmUyYv2D6F0uUI65XisGOL1hBP5mTronbgo+0bFcA==",
+      "cpu": [
+        "arm"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "linux"
+      ],
+      "engines": {
+        "node": ">=12"
+      }
+    },
+    "node_modules/@esbuild/linux-arm64": {
+      "version": "0.21.5",
+      "resolved": "https://registry.npmmirror.com/@esbuild/linux-arm64/-/linux-arm64-0.21.5.tgz",
+      "integrity": "sha512-ibKvmyYzKsBeX8d8I7MH/TMfWDXBF3db4qM6sy+7re0YXya+K1cem3on9XgdT2EQGMu4hQyZhan7TeQ8XkGp4Q==",
+      "cpu": [
+        "arm64"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "linux"
+      ],
+      "engines": {
+        "node": ">=12"
+      }
+    },
+    "node_modules/@esbuild/linux-ia32": {
+      "version": "0.21.5",
+      "resolved": "https://registry.npmmirror.com/@esbuild/linux-ia32/-/linux-ia32-0.21.5.tgz",
+      "integrity": "sha512-YvjXDqLRqPDl2dvRODYmmhz4rPeVKYvppfGYKSNGdyZkA01046pLWyRKKI3ax8fbJoK5QbxblURkwK/MWY18Tg==",
+      "cpu": [
+        "ia32"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "linux"
+      ],
+      "engines": {
+        "node": ">=12"
+      }
+    },
+    "node_modules/@esbuild/linux-loong64": {
+      "version": "0.21.5",
+      "resolved": "https://registry.npmmirror.com/@esbuild/linux-loong64/-/linux-loong64-0.21.5.tgz",
+      "integrity": "sha512-uHf1BmMG8qEvzdrzAqg2SIG/02+4/DHB6a9Kbya0XDvwDEKCoC8ZRWI5JJvNdUjtciBGFQ5PuBlpEOXQj+JQSg==",
+      "cpu": [
+        "loong64"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "linux"
+      ],
+      "engines": {
+        "node": ">=12"
+      }
+    },
+    "node_modules/@esbuild/linux-mips64el": {
+      "version": "0.21.5",
+      "resolved": "https://registry.npmmirror.com/@esbuild/linux-mips64el/-/linux-mips64el-0.21.5.tgz",
+      "integrity": "sha512-IajOmO+KJK23bj52dFSNCMsz1QP1DqM6cwLUv3W1QwyxkyIWecfafnI555fvSGqEKwjMXVLokcV5ygHW5b3Jbg==",
+      "cpu": [
+        "mips64el"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "linux"
+      ],
+      "engines": {
+        "node": ">=12"
+      }
+    },
+    "node_modules/@esbuild/linux-ppc64": {
+      "version": "0.21.5",
+      "resolved": "https://registry.npmmirror.com/@esbuild/linux-ppc64/-/linux-ppc64-0.21.5.tgz",
+      "integrity": "sha512-1hHV/Z4OEfMwpLO8rp7CvlhBDnjsC3CttJXIhBi+5Aj5r+MBvy4egg7wCbe//hSsT+RvDAG7s81tAvpL2XAE4w==",
+      "cpu": [
+        "ppc64"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "linux"
+      ],
+      "engines": {
+        "node": ">=12"
+      }
+    },
+    "node_modules/@esbuild/linux-riscv64": {
+      "version": "0.21.5",
+      "resolved": "https://registry.npmmirror.com/@esbuild/linux-riscv64/-/linux-riscv64-0.21.5.tgz",
+      "integrity": "sha512-2HdXDMd9GMgTGrPWnJzP2ALSokE/0O5HhTUvWIbD3YdjME8JwvSCnNGBnTThKGEB91OZhzrJ4qIIxk/SBmyDDA==",
+      "cpu": [
+        "riscv64"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "linux"
+      ],
+      "engines": {
+        "node": ">=12"
+      }
+    },
+    "node_modules/@esbuild/linux-s390x": {
+      "version": "0.21.5",
+      "resolved": "https://registry.npmmirror.com/@esbuild/linux-s390x/-/linux-s390x-0.21.5.tgz",
+      "integrity": "sha512-zus5sxzqBJD3eXxwvjN1yQkRepANgxE9lgOW2qLnmr8ikMTphkjgXu1HR01K4FJg8h1kEEDAqDcZQtbrRnB41A==",
+      "cpu": [
+        "s390x"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "linux"
+      ],
+      "engines": {
+        "node": ">=12"
+      }
+    },
+    "node_modules/@esbuild/linux-x64": {
+      "version": "0.21.5",
+      "resolved": "https://registry.npmmirror.com/@esbuild/linux-x64/-/linux-x64-0.21.5.tgz",
+      "integrity": "sha512-1rYdTpyv03iycF1+BhzrzQJCdOuAOtaqHTWJZCWvijKD2N5Xu0TtVC8/+1faWqcP9iBCWOmjmhoH94dH82BxPQ==",
+      "cpu": [
+        "x64"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "linux"
+      ],
+      "engines": {
+        "node": ">=12"
+      }
+    },
+    "node_modules/@esbuild/netbsd-x64": {
+      "version": "0.21.5",
+      "resolved": "https://registry.npmmirror.com/@esbuild/netbsd-x64/-/netbsd-x64-0.21.5.tgz",
+      "integrity": "sha512-Woi2MXzXjMULccIwMnLciyZH4nCIMpWQAs049KEeMvOcNADVxo0UBIQPfSmxB3CWKedngg7sWZdLvLczpe0tLg==",
+      "cpu": [
+        "x64"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "netbsd"
+      ],
+      "engines": {
+        "node": ">=12"
+      }
+    },
+    "node_modules/@esbuild/openbsd-x64": {
+      "version": "0.21.5",
+      "resolved": "https://registry.npmmirror.com/@esbuild/openbsd-x64/-/openbsd-x64-0.21.5.tgz",
+      "integrity": "sha512-HLNNw99xsvx12lFBUwoT8EVCsSvRNDVxNpjZ7bPn947b8gJPzeHWyNVhFsaerc0n3TsbOINvRP2byTZ5LKezow==",
+      "cpu": [
+        "x64"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "openbsd"
+      ],
+      "engines": {
+        "node": ">=12"
+      }
+    },
+    "node_modules/@esbuild/sunos-x64": {
+      "version": "0.21.5",
+      "resolved": "https://registry.npmmirror.com/@esbuild/sunos-x64/-/sunos-x64-0.21.5.tgz",
+      "integrity": "sha512-6+gjmFpfy0BHU5Tpptkuh8+uw3mnrvgs+dSPQXQOv3ekbordwnzTVEb4qnIvQcYXq6gzkyTnoZ9dZG+D4garKg==",
+      "cpu": [
+        "x64"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "sunos"
+      ],
+      "engines": {
+        "node": ">=12"
+      }
+    },
+    "node_modules/@esbuild/win32-arm64": {
+      "version": "0.21.5",
+      "resolved": "https://registry.npmmirror.com/@esbuild/win32-arm64/-/win32-arm64-0.21.5.tgz",
+      "integrity": "sha512-Z0gOTd75VvXqyq7nsl93zwahcTROgqvuAcYDUr+vOv8uHhNSKROyU961kgtCD1e95IqPKSQKH7tBTslnS3tA8A==",
+      "cpu": [
+        "arm64"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "win32"
+      ],
+      "engines": {
+        "node": ">=12"
+      }
+    },
+    "node_modules/@esbuild/win32-ia32": {
+      "version": "0.21.5",
+      "resolved": "https://registry.npmmirror.com/@esbuild/win32-ia32/-/win32-ia32-0.21.5.tgz",
+      "integrity": "sha512-SWXFF1CL2RVNMaVs+BBClwtfZSvDgtL//G/smwAc5oVK/UPu2Gu9tIaRgFmYFFKrmg3SyAjSrElf0TiJ1v8fYA==",
+      "cpu": [
+        "ia32"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "win32"
+      ],
+      "engines": {
+        "node": ">=12"
+      }
+    },
+    "node_modules/@esbuild/win32-x64": {
+      "version": "0.21.5",
+      "resolved": "https://registry.npmmirror.com/@esbuild/win32-x64/-/win32-x64-0.21.5.tgz",
+      "integrity": "sha512-tQd/1efJuzPC6rCFwEvLtci/xNFcTZknmXs98FYDfGE4wP9ClFV98nyKrzJKVPMhdDnjzLhdUyMX4PsQAPjwIw==",
+      "cpu": [
+        "x64"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "win32"
+      ],
+      "engines": {
+        "node": ">=12"
+      }
+    },
+    "node_modules/@jridgewell/sourcemap-codec": {
+      "version": "1.5.5",
+      "resolved": "https://registry.npmmirror.com/@jridgewell/sourcemap-codec/-/sourcemap-codec-1.5.5.tgz",
+      "integrity": "sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==",
+      "license": "MIT"
+    },
+    "node_modules/@rollup/rollup-android-arm-eabi": {
+      "version": "4.58.0",
+      "resolved": "https://registry.npmmirror.com/@rollup/rollup-android-arm-eabi/-/rollup-android-arm-eabi-4.58.0.tgz",
+      "integrity": "sha512-mr0tmS/4FoVk1cnaeN244A/wjvGDNItZKR8hRhnmCzygyRXYtKF5jVDSIILR1U97CTzAYmbgIj/Dukg62ggG5w==",
+      "cpu": [
+        "arm"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "android"
+      ]
+    },
+    "node_modules/@rollup/rollup-android-arm64": {
+      "version": "4.58.0",
+      "resolved": "https://registry.npmmirror.com/@rollup/rollup-android-arm64/-/rollup-android-arm64-4.58.0.tgz",
+      "integrity": "sha512-+s++dbp+/RTte62mQD9wLSbiMTV+xr/PeRJEc/sFZFSBRlHPNPVaf5FXlzAL77Mr8FtSfQqCN+I598M8U41ccQ==",
+      "cpu": [
+        "arm64"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "android"
+      ]
+    },
+    "node_modules/@rollup/rollup-darwin-arm64": {
+      "version": "4.58.0",
+      "resolved": "https://registry.npmmirror.com/@rollup/rollup-darwin-arm64/-/rollup-darwin-arm64-4.58.0.tgz",
+      "integrity": "sha512-MFWBwTcYs0jZbINQBXHfSrpSQJq3IUOakcKPzfeSznONop14Pxuqa0Kg19GD0rNBMPQI2tFtu3UzapZpH0Uc1Q==",
+      "cpu": [
+        "arm64"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "darwin"
+      ]
+    },
+    "node_modules/@rollup/rollup-darwin-x64": {
+      "version": "4.58.0",
+      "resolved": "https://registry.npmmirror.com/@rollup/rollup-darwin-x64/-/rollup-darwin-x64-4.58.0.tgz",
+      "integrity": "sha512-yiKJY7pj9c9JwzuKYLFaDZw5gma3fI9bkPEIyofvVfsPqjCWPglSHdpdwXpKGvDeYDms3Qal8qGMEHZ1M/4Udg==",
+      "cpu": [
+        "x64"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "darwin"
+      ]
+    },
+    "node_modules/@rollup/rollup-freebsd-arm64": {
+      "version": "4.58.0",
+      "resolved": "https://registry.npmmirror.com/@rollup/rollup-freebsd-arm64/-/rollup-freebsd-arm64-4.58.0.tgz",
+      "integrity": "sha512-x97kCoBh5MOevpn/CNK9W1x8BEzO238541BGWBc315uOlN0AD/ifZ1msg+ZQB05Ux+VF6EcYqpiagfLJ8U3LvQ==",
+      "cpu": [
+        "arm64"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "freebsd"
+      ]
+    },
+    "node_modules/@rollup/rollup-freebsd-x64": {
+      "version": "4.58.0",
+      "resolved": "https://registry.npmmirror.com/@rollup/rollup-freebsd-x64/-/rollup-freebsd-x64-4.58.0.tgz",
+      "integrity": "sha512-Aa8jPoZ6IQAG2eIrcXPpjRcMjROMFxCt1UYPZZtCxRV68WkuSigYtQ/7Zwrcr2IvtNJo7T2JfDXyMLxq5L4Jlg==",
+      "cpu": [
+        "x64"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "freebsd"
+      ]
+    },
+    "node_modules/@rollup/rollup-linux-arm-gnueabihf": {
+      "version": "4.58.0",
+      "resolved": "https://registry.npmmirror.com/@rollup/rollup-linux-arm-gnueabihf/-/rollup-linux-arm-gnueabihf-4.58.0.tgz",
+      "integrity": "sha512-Ob8YgT5kD/lSIYW2Rcngs5kNB/44Q2RzBSPz9brf2WEtcGR7/f/E9HeHn1wYaAwKBni+bdXEwgHvUd0x12lQSA==",
+      "cpu": [
+        "arm"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "linux"
+      ]
+    },
+    "node_modules/@rollup/rollup-linux-arm-musleabihf": {
+      "version": "4.58.0",
+      "resolved": "https://registry.npmmirror.com/@rollup/rollup-linux-arm-musleabihf/-/rollup-linux-arm-musleabihf-4.58.0.tgz",
+      "integrity": "sha512-K+RI5oP1ceqoadvNt1FecL17Qtw/n9BgRSzxif3rTL2QlIu88ccvY+Y9nnHe/cmT5zbH9+bpiJuG1mGHRVwF4Q==",
+      "cpu": [
+        "arm"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "linux"
+      ]
+    },
+    "node_modules/@rollup/rollup-linux-arm64-gnu": {
+      "version": "4.58.0",
+      "resolved": "https://registry.npmmirror.com/@rollup/rollup-linux-arm64-gnu/-/rollup-linux-arm64-gnu-4.58.0.tgz",
+      "integrity": "sha512-T+17JAsCKUjmbopcKepJjHWHXSjeW7O5PL7lEFaeQmiVyw4kkc5/lyYKzrv6ElWRX/MrEWfPiJWqbTvfIvjM1Q==",
+      "cpu": [
+        "arm64"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "linux"
+      ]
+    },
+    "node_modules/@rollup/rollup-linux-arm64-musl": {
+      "version": "4.58.0",
+      "resolved": "https://registry.npmmirror.com/@rollup/rollup-linux-arm64-musl/-/rollup-linux-arm64-musl-4.58.0.tgz",
+      "integrity": "sha512-cCePktb9+6R9itIJdeCFF9txPU7pQeEHB5AbHu/MKsfH/k70ZtOeq1k4YAtBv9Z7mmKI5/wOLYjQ+B9QdxR6LA==",
+      "cpu": [
+        "arm64"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "linux"
+      ]
+    },
+    "node_modules/@rollup/rollup-linux-loong64-gnu": {
+      "version": "4.58.0",
+      "resolved": "https://registry.npmmirror.com/@rollup/rollup-linux-loong64-gnu/-/rollup-linux-loong64-gnu-4.58.0.tgz",
+      "integrity": "sha512-iekUaLkfliAsDl4/xSdoCJ1gnnIXvoNz85C8U8+ZxknM5pBStfZjeXgB8lXobDQvvPRCN8FPmmuTtH+z95HTmg==",
+      "cpu": [
+        "loong64"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "linux"
+      ]
+    },
+    "node_modules/@rollup/rollup-linux-loong64-musl": {
+      "version": "4.58.0",
+      "resolved": "https://registry.npmmirror.com/@rollup/rollup-linux-loong64-musl/-/rollup-linux-loong64-musl-4.58.0.tgz",
+      "integrity": "sha512-68ofRgJNl/jYJbxFjCKE7IwhbfxOl1muPN4KbIqAIe32lm22KmU7E8OPvyy68HTNkI2iV/c8y2kSPSm2mW/Q9Q==",
+      "cpu": [
+        "loong64"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "linux"
+      ]
+    },
+    "node_modules/@rollup/rollup-linux-ppc64-gnu": {
+      "version": "4.58.0",
+      "resolved": "https://registry.npmmirror.com/@rollup/rollup-linux-ppc64-gnu/-/rollup-linux-ppc64-gnu-4.58.0.tgz",
+      "integrity": "sha512-dpz8vT0i+JqUKuSNPCP5SYyIV2Lh0sNL1+FhM7eLC457d5B9/BC3kDPp5BBftMmTNsBarcPcoz5UGSsnCiw4XQ==",
+      "cpu": [
+        "ppc64"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "linux"
+      ]
+    },
+    "node_modules/@rollup/rollup-linux-ppc64-musl": {
+      "version": "4.58.0",
+      "resolved": "https://registry.npmmirror.com/@rollup/rollup-linux-ppc64-musl/-/rollup-linux-ppc64-musl-4.58.0.tgz",
+      "integrity": "sha512-4gdkkf9UJ7tafnweBCR/mk4jf3Jfl0cKX9Np80t5i78kjIH0ZdezUv/JDI2VtruE5lunfACqftJ8dIMGN4oHew==",
+      "cpu": [
+        "ppc64"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "linux"
+      ]
+    },
+    "node_modules/@rollup/rollup-linux-riscv64-gnu": {
+      "version": "4.58.0",
+      "resolved": "https://registry.npmmirror.com/@rollup/rollup-linux-riscv64-gnu/-/rollup-linux-riscv64-gnu-4.58.0.tgz",
+      "integrity": "sha512-YFS4vPnOkDTD/JriUeeZurFYoJhPf9GQQEF/v4lltp3mVcBmnsAdjEWhr2cjUCZzZNzxCG0HZOvJU44UGHSdzw==",
+      "cpu": [
+        "riscv64"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "linux"
+      ]
+    },
+    "node_modules/@rollup/rollup-linux-riscv64-musl": {
+      "version": "4.58.0",
+      "resolved": "https://registry.npmmirror.com/@rollup/rollup-linux-riscv64-musl/-/rollup-linux-riscv64-musl-4.58.0.tgz",
+      "integrity": "sha512-x2xgZlFne+QVNKV8b4wwaCS8pwq3y14zedZ5DqLzjdRITvreBk//4Knbcvm7+lWmms9V9qFp60MtUd0/t/PXPw==",
+      "cpu": [
+        "riscv64"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "linux"
+      ]
+    },
+    "node_modules/@rollup/rollup-linux-s390x-gnu": {
+      "version": "4.58.0",
+      "resolved": "https://registry.npmmirror.com/@rollup/rollup-linux-s390x-gnu/-/rollup-linux-s390x-gnu-4.58.0.tgz",
+      "integrity": "sha512-jIhrujyn4UnWF8S+DHSkAkDEO3hLX0cjzxJZPLF80xFyzyUIYgSMRcYQ3+uqEoyDD2beGq7Dj7edi8OnJcS/hg==",
+      "cpu": [
+        "s390x"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "linux"
+      ]
+    },
+    "node_modules/@rollup/rollup-linux-x64-gnu": {
+      "version": "4.58.0",
+      "resolved": "https://registry.npmmirror.com/@rollup/rollup-linux-x64-gnu/-/rollup-linux-x64-gnu-4.58.0.tgz",
+      "integrity": "sha512-+410Srdoh78MKSJxTQ+hZ/Mx+ajd6RjjPwBPNd0R3J9FtL6ZA0GqiiyNjCO9In0IzZkCNrpGymSfn+kgyPQocg==",
+      "cpu": [
+        "x64"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "linux"
+      ]
+    },
+    "node_modules/@rollup/rollup-linux-x64-musl": {
+      "version": "4.58.0",
+      "resolved": "https://registry.npmmirror.com/@rollup/rollup-linux-x64-musl/-/rollup-linux-x64-musl-4.58.0.tgz",
+      "integrity": "sha512-ZjMyby5SICi227y1MTR3VYBpFTdZs823Rs/hpakufleBoufoOIB6jtm9FEoxn/cgO7l6PM2rCEl5Kre5vX0QrQ==",
+      "cpu": [
+        "x64"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "linux"
+      ]
+    },
+    "node_modules/@rollup/rollup-openbsd-x64": {
+      "version": "4.58.0",
+      "resolved": "https://registry.npmmirror.com/@rollup/rollup-openbsd-x64/-/rollup-openbsd-x64-4.58.0.tgz",
+      "integrity": "sha512-ds4iwfYkSQ0k1nb8LTcyXw//ToHOnNTJtceySpL3fa7tc/AsE+UpUFphW126A6fKBGJD5dhRvg8zw1rvoGFxmw==",
+      "cpu": [
+        "x64"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "openbsd"
+      ]
+    },
+    "node_modules/@rollup/rollup-openharmony-arm64": {
+      "version": "4.58.0",
+      "resolved": "https://registry.npmmirror.com/@rollup/rollup-openharmony-arm64/-/rollup-openharmony-arm64-4.58.0.tgz",
+      "integrity": "sha512-fd/zpJniln4ICdPkjWFhZYeY/bpnaN9pGa6ko+5WD38I0tTqk9lXMgXZg09MNdhpARngmxiCg0B0XUamNw/5BQ==",
+      "cpu": [
+        "arm64"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "openharmony"
+      ]
+    },
+    "node_modules/@rollup/rollup-win32-arm64-msvc": {
+      "version": "4.58.0",
+      "resolved": "https://registry.npmmirror.com/@rollup/rollup-win32-arm64-msvc/-/rollup-win32-arm64-msvc-4.58.0.tgz",
+      "integrity": "sha512-YpG8dUOip7DCz3nr/JUfPbIUo+2d/dy++5bFzgi4ugOGBIox+qMbbqt/JoORwvI/C9Kn2tz6+Bieoqd5+B1CjA==",
+      "cpu": [
+        "arm64"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "win32"
+      ]
+    },
+    "node_modules/@rollup/rollup-win32-ia32-msvc": {
+      "version": "4.58.0",
+      "resolved": "https://registry.npmmirror.com/@rollup/rollup-win32-ia32-msvc/-/rollup-win32-ia32-msvc-4.58.0.tgz",
+      "integrity": "sha512-b9DI8jpFQVh4hIXFr0/+N/TzLdpBIoPzjt0Rt4xJbW3mzguV3mduR9cNgiuFcuL/TeORejJhCWiAXe3E/6PxWA==",
+      "cpu": [
+        "ia32"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "win32"
+      ]
+    },
+    "node_modules/@rollup/rollup-win32-x64-gnu": {
+      "version": "4.58.0",
+      "resolved": "https://registry.npmmirror.com/@rollup/rollup-win32-x64-gnu/-/rollup-win32-x64-gnu-4.58.0.tgz",
+      "integrity": "sha512-CSrVpmoRJFN06LL9xhkitkwUcTZtIotYAF5p6XOR2zW0Zz5mzb3IPpcoPhB02frzMHFNo1reQ9xSF5fFm3hUsQ==",
+      "cpu": [
+        "x64"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "win32"
+      ]
+    },
+    "node_modules/@rollup/rollup-win32-x64-msvc": {
+      "version": "4.58.0",
+      "resolved": "https://registry.npmmirror.com/@rollup/rollup-win32-x64-msvc/-/rollup-win32-x64-msvc-4.58.0.tgz",
+      "integrity": "sha512-QFsBgQNTnh5K0t/sBsjJLq24YVqEIVkGpfN2VHsnN90soZyhaiA9UUHufcctVNL4ypJY0wrwad0wslx2KJQ1/w==",
+      "cpu": [
+        "x64"
+      ],
+      "dev": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "win32"
+      ]
+    },
+    "node_modules/@types/estree": {
+      "version": "1.0.8",
+      "resolved": "https://registry.npmmirror.com/@types/estree/-/estree-1.0.8.tgz",
+      "integrity": "sha512-dWHzHa2WqEXI/O1E9OjrocMTKJl2mSrEolh1Iomrv6U+JuNwaHXsXx9bLu5gG7BUWFIN0skIQJQ/L1rIex4X6w==",
+      "dev": true,
+      "license": "MIT"
+    },
+    "node_modules/@vitejs/plugin-vue": {
+      "version": "5.2.4",
+      "resolved": "https://registry.npmmirror.com/@vitejs/plugin-vue/-/plugin-vue-5.2.4.tgz",
+      "integrity": "sha512-7Yx/SXSOcQq5HiiV3orevHUFn+pmMB4cgbEkDYgnkUWb0WfeQ/wa2yFv6D5ICiCQOVpjA7vYDXrC7AGO8yjDHA==",
+      "dev": true,
+      "license": "MIT",
+      "engines": {
+        "node": "^18.0.0 || >=20.0.0"
+      },
+      "peerDependencies": {
+        "vite": "^5.0.0 || ^6.0.0",
+        "vue": "^3.2.25"
+      }
+    },
+    "node_modules/@vue/compiler-core": {
+      "version": "3.5.28",
+      "resolved": "https://registry.npmmirror.com/@vue/compiler-core/-/compiler-core-3.5.28.tgz",
+      "integrity": "sha512-kviccYxTgoE8n6OCw96BNdYlBg2GOWfBuOW4Vqwrt7mSKWKwFVvI8egdTltqRgITGPsTFYtKYfxIG8ptX2PJHQ==",
+      "license": "MIT",
+      "dependencies": {
+        "@babel/parser": "^7.29.0",
+        "@vue/shared": "3.5.28",
+        "entities": "^7.0.1",
+        "estree-walker": "^2.0.2",
+        "source-map-js": "^1.2.1"
+      }
+    },
+    "node_modules/@vue/compiler-dom": {
+      "version": "3.5.28",
+      "resolved": "https://registry.npmmirror.com/@vue/compiler-dom/-/compiler-dom-3.5.28.tgz",
+      "integrity": "sha512-/1ZepxAb159jKR1btkefDP+J2xuWL5V3WtleRmxaT+K2Aqiek/Ab/+Ebrw2pPj0sdHO8ViAyyJWfhXXOP/+LQA==",
+      "license": "MIT",
+      "dependencies": {
+        "@vue/compiler-core": "3.5.28",
+        "@vue/shared": "3.5.28"
+      }
+    },
+    "node_modules/@vue/compiler-sfc": {
+      "version": "3.5.28",
+      "resolved": "https://registry.npmmirror.com/@vue/compiler-sfc/-/compiler-sfc-3.5.28.tgz",
+      "integrity": "sha512-6TnKMiNkd6u6VeVDhZn/07KhEZuBSn43Wd2No5zaP5s3xm8IqFTHBj84HJah4UepSUJTro5SoqqlOY22FKY96g==",
+      "license": "MIT",
+      "dependencies": {
+        "@babel/parser": "^7.29.0",
+        "@vue/compiler-core": "3.5.28",
+        "@vue/compiler-dom": "3.5.28",
+        "@vue/compiler-ssr": "3.5.28",
+        "@vue/shared": "3.5.28",
+        "estree-walker": "^2.0.2",
+        "magic-string": "^0.30.21",
+        "postcss": "^8.5.6",
+        "source-map-js": "^1.2.1"
+      }
+    },
+    "node_modules/@vue/compiler-ssr": {
+      "version": "3.5.28",
+      "resolved": "https://registry.npmmirror.com/@vue/compiler-ssr/-/compiler-ssr-3.5.28.tgz",
+      "integrity": "sha512-JCq//9w1qmC6UGLWJX7RXzrGpKkroubey/ZFqTpvEIDJEKGgntuDMqkuWiZvzTzTA5h2qZvFBFHY7fAAa9475g==",
+      "license": "MIT",
+      "dependencies": {
+        "@vue/compiler-dom": "3.5.28",
+        "@vue/shared": "3.5.28"
+      }
+    },
+    "node_modules/@vue/reactivity": {
+      "version": "3.5.28",
+      "resolved": "https://registry.npmmirror.com/@vue/reactivity/-/reactivity-3.5.28.tgz",
+      "integrity": "sha512-gr5hEsxvn+RNyu9/9o1WtdYdwDjg5FgjUSBEkZWqgTKlo/fvwZ2+8W6AfKsc9YN2k/+iHYdS9vZYAhpi10kNaw==",
+      "license": "MIT",
+      "dependencies": {
+        "@vue/shared": "3.5.28"
+      }
+    },
+    "node_modules/@vue/runtime-core": {
+      "version": "3.5.28",
+      "resolved": "https://registry.npmmirror.com/@vue/runtime-core/-/runtime-core-3.5.28.tgz",
+      "integrity": "sha512-POVHTdbgnrBBIpnbYU4y7pOMNlPn2QVxVzkvEA2pEgvzbelQq4ZOUxbp2oiyo+BOtiYlm8Q44wShHJoBvDPAjQ==",
+      "license": "MIT",
+      "dependencies": {
+        "@vue/reactivity": "3.5.28",
+        "@vue/shared": "3.5.28"
+      }
+    },
+    "node_modules/@vue/runtime-dom": {
+      "version": "3.5.28",
+      "resolved": "https://registry.npmmirror.com/@vue/runtime-dom/-/runtime-dom-3.5.28.tgz",
+      "integrity": "sha512-4SXxSF8SXYMuhAIkT+eBRqOkWEfPu6nhccrzrkioA6l0boiq7sp18HCOov9qWJA5HML61kW8p/cB4MmBiG9dSA==",
+      "license": "MIT",
+      "dependencies": {
+        "@vue/reactivity": "3.5.28",
+        "@vue/runtime-core": "3.5.28",
+        "@vue/shared": "3.5.28",
+        "csstype": "^3.2.3"
+      }
+    },
+    "node_modules/@vue/server-renderer": {
+      "version": "3.5.28",
+      "resolved": "https://registry.npmmirror.com/@vue/server-renderer/-/server-renderer-3.5.28.tgz",
+      "integrity": "sha512-pf+5ECKGj8fX95bNincbzJ6yp6nyzuLDhYZCeFxUNp8EBrQpPpQaLX3nNCp49+UbgbPun3CeVE+5CXVV1Xydfg==",
+      "license": "MIT",
+      "dependencies": {
+        "@vue/compiler-ssr": "3.5.28",
+        "@vue/shared": "3.5.28"
+      },
+      "peerDependencies": {
+        "vue": "3.5.28"
+      }
+    },
+    "node_modules/@vue/shared": {
+      "version": "3.5.28",
+      "resolved": "https://registry.npmmirror.com/@vue/shared/-/shared-3.5.28.tgz",
+      "integrity": "sha512-cfWa1fCGBxrvaHRhvV3Is0MgmrbSCxYTXCSCau2I0a1Xw1N1pHAvkWCiXPRAqjvToILvguNyEwjevUqAuBQWvQ==",
+      "license": "MIT"
+    },
+    "node_modules/csstype": {
+      "version": "3.2.3",
+      "resolved": "https://registry.npmmirror.com/csstype/-/csstype-3.2.3.tgz",
+      "integrity": "sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ==",
+      "license": "MIT"
+    },
+    "node_modules/entities": {
+      "version": "7.0.1",
+      "resolved": "https://registry.npmmirror.com/entities/-/entities-7.0.1.tgz",
+      "integrity": "sha512-TWrgLOFUQTH994YUyl1yT4uyavY5nNB5muff+RtWaqNVCAK408b5ZnnbNAUEWLTCpum9w6arT70i1XdQ4UeOPA==",
+      "license": "BSD-2-Clause",
+      "engines": {
+        "node": ">=0.12"
+      },
+      "funding": {
+        "url": "https://github.com/fb55/entities?sponsor=1"
+      }
+    },
+    "node_modules/esbuild": {
+      "version": "0.21.5",
+      "resolved": "https://registry.npmmirror.com/esbuild/-/esbuild-0.21.5.tgz",
+      "integrity": "sha512-mg3OPMV4hXywwpoDxu3Qda5xCKQi+vCTZq8S9J/EpkhB2HzKXq4SNFZE3+NK93JYxc8VMSep+lOUSC/RVKaBqw==",
+      "dev": true,
+      "hasInstallScript": true,
+      "license": "MIT",
+      "bin": {
+        "esbuild": "bin/esbuild"
+      },
+      "engines": {
+        "node": ">=12"
+      },
+      "optionalDependencies": {
+        "@esbuild/aix-ppc64": "0.21.5",
+        "@esbuild/android-arm": "0.21.5",
+        "@esbuild/android-arm64": "0.21.5",
+        "@esbuild/android-x64": "0.21.5",
+        "@esbuild/darwin-arm64": "0.21.5",
+        "@esbuild/darwin-x64": "0.21.5",
+        "@esbuild/freebsd-arm64": "0.21.5",
+        "@esbuild/freebsd-x64": "0.21.5",
+        "@esbuild/linux-arm": "0.21.5",
+        "@esbuild/linux-arm64": "0.21.5",
+        "@esbuild/linux-ia32": "0.21.5",
+        "@esbuild/linux-loong64": "0.21.5",
+        "@esbuild/linux-mips64el": "0.21.5",
+        "@esbuild/linux-ppc64": "0.21.5",
+        "@esbuild/linux-riscv64": "0.21.5",
+        "@esbuild/linux-s390x": "0.21.5",
+        "@esbuild/linux-x64": "0.21.5",
+        "@esbuild/netbsd-x64": "0.21.5",
+        "@esbuild/openbsd-x64": "0.21.5",
+        "@esbuild/sunos-x64": "0.21.5",
+        "@esbuild/win32-arm64": "0.21.5",
+        "@esbuild/win32-ia32": "0.21.5",
+        "@esbuild/win32-x64": "0.21.5"
+      }
+    },
+    "node_modules/estree-walker": {
+      "version": "2.0.2",
+      "resolved": "https://registry.npmmirror.com/estree-walker/-/estree-walker-2.0.2.tgz",
+      "integrity": "sha512-Rfkk/Mp/DL7JVje3u18FxFujQlTNR2q6QfMSMB7AvCBx91NGj/ba3kCfza0f6dVDbw7YlRf/nDrn7pQrCCyQ/w==",
+      "license": "MIT"
+    },
+    "node_modules/fsevents": {
+      "version": "2.3.3",
+      "resolved": "https://registry.npmmirror.com/fsevents/-/fsevents-2.3.3.tgz",
+      "integrity": "sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==",
+      "dev": true,
+      "hasInstallScript": true,
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "darwin"
+      ],
+      "engines": {
+        "node": "^8.16.0 || ^10.6.0 || >=11.0.0"
+      }
+    },
+    "node_modules/magic-string": {
+      "version": "0.30.21",
+      "resolved": "https://registry.npmmirror.com/magic-string/-/magic-string-0.30.21.tgz",
+      "integrity": "sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==",
+      "license": "MIT",
+      "dependencies": {
+        "@jridgewell/sourcemap-codec": "^1.5.5"
+      }
+    },
+    "node_modules/nanoid": {
+      "version": "3.3.11",
+      "resolved": "https://registry.npmmirror.com/nanoid/-/nanoid-3.3.11.tgz",
+      "integrity": "sha512-N8SpfPUnUp1bK+PMYW8qSWdl9U+wwNWI4QKxOYDy9JAro3WMX7p2OeVRF9v+347pnakNevPmiHhNmZ2HbFA76w==",
+      "funding": [
+        {
+          "type": "github",
+          "url": "https://github.com/sponsors/ai"
+        }
+      ],
+      "license": "MIT",
+      "bin": {
+        "nanoid": "bin/nanoid.cjs"
+      },
+      "engines": {
+        "node": "^10 || ^12 || ^13.7 || ^14 || >=15.0.1"
+      }
+    },
+    "node_modules/picocolors": {
+      "version": "1.1.1",
+      "resolved": "https://registry.npmmirror.com/picocolors/-/picocolors-1.1.1.tgz",
+      "integrity": "sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==",
+      "license": "ISC"
+    },
+    "node_modules/postcss": {
+      "version": "8.5.6",
+      "resolved": "https://registry.npmmirror.com/postcss/-/postcss-8.5.6.tgz",
+      "integrity": "sha512-3Ybi1tAuwAP9s0r1UQ2J4n5Y0G05bJkpUIO0/bI9MhwmD70S5aTWbXGBwxHrelT+XM1k6dM0pk+SwNkpTRN7Pg==",
+      "funding": [
+        {
+          "type": "opencollective",
+          "url": "https://opencollective.com/postcss/"
+        },
+        {
+          "type": "tidelift",
+          "url": "https://tidelift.com/funding/github/npm/postcss"
+        },
+        {
+          "type": "github",
+          "url": "https://github.com/sponsors/ai"
+        }
+      ],
+      "license": "MIT",
+      "dependencies": {
+        "nanoid": "^3.3.11",
+        "picocolors": "^1.1.1",
+        "source-map-js": "^1.2.1"
+      },
+      "engines": {
+        "node": "^10 || ^12 || >=14"
+      }
+    },
+    "node_modules/rollup": {
+      "version": "4.58.0",
+      "resolved": "https://registry.npmmirror.com/rollup/-/rollup-4.58.0.tgz",
+      "integrity": "sha512-wbT0mBmWbIvvq8NeEYWWvevvxnOyhKChir47S66WCxw1SXqhw7ssIYejnQEVt7XYQpsj2y8F9PM+Cr3SNEa0gw==",
+      "dev": true,
+      "license": "MIT",
+      "dependencies": {
+        "@types/estree": "1.0.8"
+      },
+      "bin": {
+        "rollup": "dist/bin/rollup"
+      },
+      "engines": {
+        "node": ">=18.0.0",
+        "npm": ">=8.0.0"
+      },
+      "optionalDependencies": {
+        "@rollup/rollup-android-arm-eabi": "4.58.0",
+        "@rollup/rollup-android-arm64": "4.58.0",
+        "@rollup/rollup-darwin-arm64": "4.58.0",
+        "@rollup/rollup-darwin-x64": "4.58.0",
+        "@rollup/rollup-freebsd-arm64": "4.58.0",
+        "@rollup/rollup-freebsd-x64": "4.58.0",
+        "@rollup/rollup-linux-arm-gnueabihf": "4.58.0",
+        "@rollup/rollup-linux-arm-musleabihf": "4.58.0",
+        "@rollup/rollup-linux-arm64-gnu": "4.58.0",
+        "@rollup/rollup-linux-arm64-musl": "4.58.0",
+        "@rollup/rollup-linux-loong64-gnu": "4.58.0",
+        "@rollup/rollup-linux-loong64-musl": "4.58.0",
+        "@rollup/rollup-linux-ppc64-gnu": "4.58.0",
+        "@rollup/rollup-linux-ppc64-musl": "4.58.0",
+        "@rollup/rollup-linux-riscv64-gnu": "4.58.0",
+        "@rollup/rollup-linux-riscv64-musl": "4.58.0",
+        "@rollup/rollup-linux-s390x-gnu": "4.58.0",
+        "@rollup/rollup-linux-x64-gnu": "4.58.0",
+        "@rollup/rollup-linux-x64-musl": "4.58.0",
+        "@rollup/rollup-openbsd-x64": "4.58.0",
+        "@rollup/rollup-openharmony-arm64": "4.58.0",
+        "@rollup/rollup-win32-arm64-msvc": "4.58.0",
+        "@rollup/rollup-win32-ia32-msvc": "4.58.0",
+        "@rollup/rollup-win32-x64-gnu": "4.58.0",
+        "@rollup/rollup-win32-x64-msvc": "4.58.0",
+        "fsevents": "~2.3.2"
+      }
+    },
+    "node_modules/source-map-js": {
+      "version": "1.2.1",
+      "resolved": "https://registry.npmmirror.com/source-map-js/-/source-map-js-1.2.1.tgz",
+      "integrity": "sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==",
+      "license": "BSD-3-Clause",
+      "engines": {
+        "node": ">=0.10.0"
+      }
+    },
+    "node_modules/vite": {
+      "version": "5.4.21",
+      "resolved": "https://registry.npmmirror.com/vite/-/vite-5.4.21.tgz",
+      "integrity": "sha512-o5a9xKjbtuhY6Bi5S3+HvbRERmouabWbyUcpXXUA1u+GNUKoROi9byOJ8M0nHbHYHkYICiMlqxkg1KkYmm25Sw==",
+      "dev": true,
+      "license": "MIT",
+      "dependencies": {
+        "esbuild": "^0.21.3",
+        "postcss": "^8.4.43",
+        "rollup": "^4.20.0"
+      },
+      "bin": {
+        "vite": "bin/vite.js"
+      },
+      "engines": {
+        "node": "^18.0.0 || >=20.0.0"
+      },
+      "funding": {
+        "url": "https://github.com/vitejs/vite?sponsor=1"
+      },
+      "optionalDependencies": {
+        "fsevents": "~2.3.3"
+      },
+      "peerDependencies": {
+        "@types/node": "^18.0.0 || >=20.0.0",
+        "less": "*",
+        "lightningcss": "^1.21.0",
+        "sass": "*",
+        "sass-embedded": "*",
+        "stylus": "*",
+        "sugarss": "*",
+        "terser": "^5.4.0"
+      },
+      "peerDependenciesMeta": {
+        "@types/node": {
+          "optional": true
+        },
+        "less": {
+          "optional": true
+        },
+        "lightningcss": {
+          "optional": true
+        },
+        "sass": {
+          "optional": true
+        },
+        "sass-embedded": {
+          "optional": true
+        },
+        "stylus": {
+          "optional": true
+        },
+        "sugarss": {
+          "optional": true
+        },
+        "terser": {
+          "optional": true
+        }
+      }
+    },
+    "node_modules/vue": {
+      "version": "3.5.28",
+      "resolved": "https://registry.npmmirror.com/vue/-/vue-3.5.28.tgz",
+      "integrity": "sha512-BRdrNfeoccSoIZeIhyPBfvWSLFP4q8J3u8Ju8Ug5vu3LdD+yTM13Sg4sKtljxozbnuMu1NB1X5HBHRYUzFocKg==",
+      "license": "MIT",
+      "dependencies": {
+        "@vue/compiler-dom": "3.5.28",
+        "@vue/compiler-sfc": "3.5.28",
+        "@vue/runtime-dom": "3.5.28",
+        "@vue/server-renderer": "3.5.28",
+        "@vue/shared": "3.5.28"
+      },
+      "peerDependencies": {
+        "typescript": "*"
+      },
+      "peerDependenciesMeta": {
+        "typescript": {
+          "optional": true
+        }
+      }
+    }
+  }
+}
+
+--- package.json ---
+{
+  "name": "card-king",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "vue": "^3.4.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.0",
+    "vite": "^5.0.0"
+  }
+}
+
+--- project_rules.md ---
+1. 项目概述
+项目名称：card-king（中文名：三卡对决）
+引擎：Godot 4.x（GDScript）
+平台：Windows / macOS / Linux（优先桌面），可扩展至 HTML5
+游戏类型：2D 单人扑克策略游戏，玩家与电脑对手进行多轮对决
+2. 游戏目标
+在可配置的轮次（默认5轮）结束后，累计积分最高的玩家获胜。
+玩家需通过合理分配手牌，在三种扑克小游戏（单张比大小、24点和、比三张）的每个小组中争取更高名次，从而最大化总分。
+3. 玩家配置
+人类玩家：1名
+电脑对手数量：可配置 1~3 名，即总玩家数可为 2~4 人
+每轮每位玩家获得 12 张手牌（从一副去掉大小王的 52 张扑克中抽取）
+4. 游戏流程（每轮）
+4.1 发牌
+牌堆：一副标准扑克（52张，无大小王）
+每轮开始前彻底洗牌
+根据当前玩家总数 N，为每位玩家发放 12 张牌。剩余牌（52 - N×12）本轮弃用
+4.2 分组阶段
+每位玩家需将 12 张牌分成 两份（每份 6 张），每份内部分为三个小组：
+1张牌组（单张组）
+2张牌组（24点组）
+3张牌组（比三张组）
+每位玩家共形成 6 个小组，各小组牌数固定，不可更改
+分组要求：
+每个小组的牌数必须严格符合规定（1、2、3张）
+所有手牌必须用完，不得剩余
+小组之间牌不可重复
+4.3 比较阶段
+所有玩家完成分组后，同时亮出各组的牌
+对 每一个小组（共6组）独立进行以下比较：
+① 单张组
+按扑克点数大小排序，从大到小：A > K > Q > J > 10 > 9 > … > 2
+点数相同则比较花色，花色大小为: 黑桃 > 红桃 > 梅花 > 方片
+② 24点组
+按两张牌的点数之和排序，小于等于24点时，和越大排名越高
+点数相同，则先比较点数最大的牌的点数，若仍相同则比较点数最大的牌的花色，花色大小为: 黑桃 > 红桃 > 梅花 > 方片
+③ 比三张组
+按标准比三张牌型大小排序，优先级为：
+豹子（三张同点）
+同花顺（同花且顺子）
+同花（三张同花色）
+顺子（点数连续，A可作为1或14，但不可循环，如QKA、A23合法）
+对子（两张同点）
+散牌（高牌）
+若牌型相同，则依次比较单张点数（从大到小）；若仍相同，则比较花色，花色大小为: 黑桃 > 红桃 > 梅花 > 方片
+4.4 计分规则
+设有 P 名玩家（P = 2,3,4）
+每组根据排名分配积分：
+第一名获得 P-1 分
+第二名获得 P-2 分
+……
+最后一名 0 分
+比三张组 的得分 翻倍（即第一名得 2×(P-1) 分，第二名得 2×(P-2) 分，以此类推）
+每组独立计分，立即累加到玩家的 累计总分 中
+4.5 轮次循环
+完成一轮所有 6 组的比较与计分后，若已进行轮数达到设定值，则游戏结束，显示最终排名；否则进入下一轮（重新洗牌、发牌、分组）
+5. 游戏配置（主菜单）
+电脑玩家数量：滑动条或下拉框，可选 1、2、3
+游戏轮数：滑动条或输入框，范围 1~10，默认 5
+“开始游戏”按钮：点击后进入游戏主场景，并应用上述配置
+“退出”按钮：退出游戏
+6. 用户界面需求
+6.1 主菜单
+简洁背景，显示游戏标题
+配置项区域
+开始游戏 / 退出按钮
+6.2 游戏主界面
+顶部状态栏：显示当前轮次/总轮数，玩家当前总分
+玩家手牌区：横向展示 12 张牌（牌面朝上），每张牌可点击或拖拽
+分组区：展示 6 个小组槽位，每个槽位标明组类型（单张、24点、比三张）及所属份数（第一份/第二份），槽位内显示已放入的牌的小图标或文字
+操作按钮：
+“自动分组”：随机将手牌填入所有槽位（用于快速测试或辅助）
+“确认分组”：当所有槽位均填满且符合牌数要求时可用，点击后提交玩家分组
+电脑状态区：显示每位电脑的头像和当前状态（如“思考中…”或“已准备”）
+6.3 结果展示
+比较阶段：可以用动画或高亮显示每组胜者
+本轮结束后弹出简要报告，列出各组获胜者及得分
+游戏结束时显示最终积分榜，并高亮胜利者
+7. 人工智能（AI）需求
+电脑对手需具备自动分组能力
+基础版本：随机分组（将手牌随机排序后按顺序填入各组）
+进阶版本（可选）：基于简单策略，例如：
+单张组尽量留大牌
+24点组尽量选点数大的两张
+比三张组尝试凑成同花或顺子等大牌型
+AI 决策应在玩家分组期间同步完成，避免明显等待
+8. 技术需求
+引擎：Godot 4.x
+语言：GDScript
+分辨率：适配 1280×720 及以上
+资源：扑克牌图片，字体、音效可选
+9. 非功能需求
+可维护性：代码模块化，核心规则（比较、计分）独立为工具类，便于修改
+可配置性：游戏轮数、电脑人数可通过全局变量传递
+用户体验：操作流畅，反馈清晰，无明显卡顿
+
+二、开发规范
+1. 注释规范
+所有注释均使用中文
+生成的函数、接口、类等均需添加中文注释，包括：
+功能描述
+参数说明（名称、类型、作用）
+返回值说明（类型、含义）
+可能抛出的异常或需要注意的事项
+复杂逻辑处应添加行内注释，解释算法思路或关键步骤
+2. 编码原则
+准确理解与执行：开发前需充分理解需求，如有歧义及时与需求方确认；严格执行已确定的功能要求，不擅自添加、删除或修改功能
+模块化设计：将系统划分为独立模块（如牌堆、玩家、AI、规则评估、UI控制器等），降低耦合，提高可复用性
+优先复用现有模块：在进行新功能开发或问题解决时，应先梳理系统现有功能模块清单，评估能否复用或扩展现有模块，避免重复开发
+修改代码时全面检查：修改一处代码时，必须查看关联上下游文件，确保修改不会引入新问题或破坏系统稳定性
+单元测试：关键逻辑（如牌型比较、计分规则）应编写测试脚本，确保正确性
+3. 命名规范
+节点路径：使用英文小写加下划线，如 player_hand_container
+脚本文件名：使用大驼峰（PascalCase），如 Game.gd, RuleEvaluator.gd
+类名：与文件名一致，大驼峰
+变量/函数名：使用小驼峰（camelCase），如 currentRound, calculateScore()
+常量：使用全大写加下划线，如 MAX_PLAYERS
+
+# 特别备注
+不需要启动
+
+--- src/App.vue ---
+<template>
+  <div id="app">
+    <MainMenu v-if="gameStore.gamePhase === 'menu'" />
+    <GameMain v-else-if="gameStore.gamePhase !== 'gameOver'" />
+    <ResultDisplay v-if="gameStore.gamePhase === 'gameOver'" />
+  </div>
+</template>
+
+<script>
+import { watch } from 'vue'
+import MainMenu from './components/MainMenu.vue'
+import GameMain from './components/GameMain.vue'
+import ResultDisplay from './components/ResultDisplay.vue'
+import gameStore from './store/gameStore.js'
+
+export default {
+  name: 'App',
+  components: {
+    MainMenu,
+    GameMain,
+    ResultDisplay
+  },
+  setup() {
+    watch(() => gameStore.gamePhase, (newPhase) => {
+      console.log('游戏阶段切换:', newPhase)
+    })
+
+    return {
+      gameStore
+    }
+  }
+}
+</script>
+
+--- src/components/GameMain.vue ---
+<template>
+  <div class="game">
+
+    <header class="header">
+      <div class="header-left">
+        <div class="logo">
+          <span class="logo-icon">◈</span>
+          <span class="logo-text">三卡对决</span>
+        </div>
+        <button class="rules-btn" @click="showRules = true">
+          <span class="rules-icon">?</span>
+          <span class="rules-text">规则说明</span>
+        </button>
+      </div>
+      
+      <div class="header-center">
+        <div class="stat-block">
+          <div class="stat-label">当前轮次</div>
+          <div class="stat-value">{{ gameStore.currentRound }}<span class="stat-divider">/</span>{{ gameStore.totalRounds }} <span class="sub-round">({{ gameStore.subRound }}/2)</span></div>
+        </div>
+      </div>
+      
+      <div class="header-right">
+        <div class="status-indicator">
+          <span class="status-dot"></span>
+          {{ statusText }}
+        </div>
+      </div>
+    </header>
+
+    <div class="main-container">
+      <aside class="sidebar">
+        <div class="sidebar-title">
+          <span class="title-line"></span>
+          玩家
+        </div>
+        
+        <div class="player-list">
+          <div 
+            v-for="(player, index) in gameStore.players" 
+            :key="player.id"
+            class="player-card"
+            :class="{ 'is-me': !player.isAI }"
+          >
+            <div class="player-info">
+              <div class="player-avatar">{{ getPlayerInitial(player, index) }}</div>
+              <div class="player-detail">
+                <div class="player-name">{{ player.name }}</div>
+                <div class="player-status">{{ !player.isAI ? '我' : 'CPU' }}</div>
+              </div>
+            </div>
+            <div class="player-score">{{ getPlayerScore(player.id) }}</div>
+          </div>
+        </div>
+      </aside>
+
+      <main class="workbench">
+        <div class="zone" data-label="A区 · 单张" :class="{ 'zone-ready': getGroupStatus('single').ready }">
+          <div class="zone-header">
+            <span>单张比大小</span>
+            <span class="zone-weight">1×</span>
+          </div>
+          <div 
+            class="zone-content"
+            :class="{ 'zone-clickable': selectedCardIndex !== null }"
+            @dragover.prevent
+            @drop="onDrop($event, 'single')"
+            @click="onZoneClick('single')"
+          >
+            <div 
+              v-for="(player, index) in gameStore.players" 
+              :key="player.id"
+              class="zone-row"
+              :class="{ 'is-player': !player.isAI, 'is-complete': getGroupStatus('single').ready }"
+            >
+              <div class="zone-row-label">{{ getPlayerInitial(player, index) }}</div>
+              <div class="zone-cards">
+                <div 
+                  v-for="(card, cardIndex) in getDisplayCards(player.id, 'single', 1)" 
+                  :key="cardIndex"
+                  class="zone-card-mini"
+                  :class="card === -1 ? 'card-back' : getCardColorClass(card)"
+                  @click="card !== -1 && removeCardFromGroup(player.id, 'single', cardIndex)"
+                >
+                  {{ card === -1 ? '' : card.displayName }}
+                </div>
+              </div>
+              <div v-if="gameStore.gamePhase === 'roundResult' && getGroupScore(player.id, 'single') > 0" class="zone-row-score">
+                +{{ getGroupScore(player.id, 'single') }}
+              </div>
+            </div>
+          </div>
+          <div class="zone-info">
+            <span>拖入卡牌 ({{ getGroupStatus('single').count }}/{{ getGroupStatus('single').required }})</span>
+          </div>
+        </div>
+
+        <div class="zone" data-label="B区 · 24点" :class="{ 'zone-ready': getGroupStatus('twentyFourPoint').ready }">
+          <div class="zone-header">
+            <span>24点和</span>
+            <span class="zone-weight">1×</span>
+          </div>
+          <div 
+            class="zone-content"
+            :class="{ 'zone-clickable': selectedCardIndex !== null }"
+            @dragover.prevent
+            @drop="onDrop($event, 'twentyFourPoint')"
+            @click="onZoneClick('twentyFourPoint')"
+          >
+            <div 
+              v-for="(player, index) in gameStore.players" 
+              :key="player.id"
+              class="zone-row"
+              :class="{ 'is-player': !player.isAI, 'is-complete': getGroupStatus('twentyFourPoint').ready }"
+            >
+              <div class="zone-row-label">{{ getPlayerInitial(player, index) }}</div>
+              <div class="zone-cards">
+                <div 
+                  v-for="(card, cardIndex) in getDisplayCards(player.id, 'twentyFourPoint', 2)" 
+                  :key="cardIndex"
+                  class="zone-card-mini"
+                  :class="card === -1 ? 'card-back' : getCardColorClass(card)"
+                  @click="card !== -1 && removeCardFromGroup(player.id, 'twentyFourPoint', cardIndex)"
+                >
+                  {{ card === -1 ? '' : card.displayName }}
+                </div>
+              </div>
+              <div v-if="gameStore.gamePhase === 'roundResult' && getGroupScore(player.id, 'twentyFourPoint') > 0" class="zone-row-score">
+                +{{ getGroupScore(player.id, 'twentyFourPoint') }}
+              </div>
+            </div>
+          </div>
+          <div class="zone-info">
+            <span>拖入卡牌 ({{ getGroupStatus('twentyFourPoint').count }}/{{ getGroupStatus('twentyFourPoint').required }})</span>
+          </div>
+        </div>
+
+        <div class="zone" data-label="C区 · 比三张" :class="{ 'zone-ready': getGroupStatus('threeCard').ready }">
+          <div class="zone-header">
+            <span>比三张</span>
+            <span class="zone-weight zone-weight-highlight">2×</span>
+          </div>
+          <div 
+            class="zone-content"
+            :class="{ 'zone-clickable': selectedCardIndex !== null }"
+            @dragover.prevent
+            @drop="onDrop($event, 'threeCard')"
+            @click="onZoneClick('threeCard')"
+          >
+            <div 
+              v-for="(player, index) in gameStore.players" 
+              :key="player.id"
+              class="zone-row"
+              :class="{ 'is-player': !player.isAI, 'is-complete': getGroupStatus('threeCard').ready }"
+            >
+              <div class="zone-row-label">{{ getPlayerInitial(player, index) }}</div>
+              <div class="zone-cards">
+                <div 
+                  v-for="(card, cardIndex) in getDisplayCards(player.id, 'threeCard', 3)" 
+                  :key="cardIndex"
+                  class="zone-card-mini"
+                  :class="card === -1 ? 'card-back' : getCardColorClass(card)"
+                  @click="card !== -1 && removeCardFromGroup(player.id, 'threeCard', cardIndex)"
+                >
+                  {{ card === -1 ? '' : card.displayName }}
+                </div>
+              </div>
+              <div v-if="gameStore.gamePhase === 'roundResult' && getGroupScore(player.id, 'threeCard') > 0" class="zone-row-score">
+                +{{ getGroupScore(player.id, 'threeCard') }}
+              </div>
+            </div>
+          </div>
+          <div class="zone-info">
+            <span>拖入卡牌 ({{ getGroupStatus('threeCard').count }}/{{ getGroupStatus('threeCard').required }})</span>
+          </div>
+        </div>
+      </main>
+
+      <aside class="sidebar sidebar-right">
+        <template v-if="gameStore.gamePhase === 'roundResult'">
+          <div class="sidebar-title">
+            <span class="title-line"></span>
+            第 {{ gameStore.currentRound }} 轮结算{{ gameStore.subRound === 1 ? '(上回合)' : '(下回合)' }}
+          </div>
+          <div class="result-list">
+            <div class="result-item header">
+              <span>玩家</span>
+              <span>得分</span>
+              <span>累计</span>
+            </div>
+            <div 
+              v-for="player in gameStore.players" 
+              :key="player.id" 
+              class="result-item"
+            >
+              <span class="result-name">{{ player.isAI ? '电脑' + player.id.replace('cpu', '') : '玩家' }}</span>
+              <span class="result-score">+{{ gameStore.roundScores[player.id] || 0 }}</span>
+              <span class="result-total">{{ gameStore.totalScores[player.id] || 0 }}</span>
+            </div>
+          </div>
+          <div class="result-actions">
+            <button class="btn btn-highlight" @click="handleNext">
+              {{ gameStore.subRound === 1 ? '下回合' : (gameStore.isGameOver() ? '查看结果' : '下一轮') }}
+            </button>
+          </div>
+        </template>
+        <template v-else>
+          <div class="sidebar-title">
+            <span class="title-line"></span>
+            LOGS
+          </div>
+          <div class="log-list">
+            <div v-for="(log, index) in gameLogs" :key="index" class="log-entry">
+              {{ log }}
+            </div>
+          </div>
+        </template>
+      </aside>
+    </div>
+
+    <div class="hand-area" v-if="gameStore.gamePhase === 'grouping'">
+      <div class="hand-header">
+        <div class="hand-header-left">
+          <span class="hand-title">手牌</span>
+          <span class="hand-count">剩余 {{ remainingHandCards }} 张</span>
+        </div>
+        <button class="btn-sort" @click="toggleSort">{{ sortModeText }}</button>
+      </div>
+      
+      <div class="hand-cards">
+        <div 
+          v-for="(card, index) in playerHand" 
+          :key="index"
+          class="playing-card"
+          :class="[getCardColorClass(card), { 'is-selected': selectedCardIndex === index, 'is-dragging': draggingIndex === index }]"
+          draggable="true"
+          @dragstart="onDragStart($event, card, index)"
+          @dragend="onDragEnd"
+          @click="handleCardClick(card, index)"
+        >
+          <div class="card-corner top">
+            <span>{{ card.rank }}</span>
+            <span>{{ getSuitSymbol(card.suit) }}</span>
+          </div>
+          <div class="card-center">{{ getSuitSymbol(card.suit) }}</div>
+          <div class="card-corner bottom">
+            <span>{{ card.rank }}</span>
+            <span>{{ getSuitSymbol(card.suit) }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="hand-actions" v-if="gameStore.gamePhase === 'grouping'">
+        <button class="btn" @click="resetHand">清空</button>
+        <button class="btn btn-highlight" :disabled="!canConfirm" @click="confirmGroup">确认出牌</button>
+      </div>
+    </div>
+
+    <div class="rules-modal" v-if="showRules" @click.self="showRules = false">
+      <div class="rules-content">
+        <div class="rules-header">
+          <h2>游戏规则</h2>
+          <button class="rules-close" @click="showRules = false">×</button>
+        </div>
+        <div class="rules-body">
+          <div class="rules-section">
+            <h3>游戏目标</h3>
+            <p>在可配置的轮次（默认5轮）结束后，累计积分最高的玩家获胜。玩家需通过合理分配手牌，在三种扑克小游戏（单张比大小、24点和、比三张）的每个小组中争取更高名次，从而最大化总分。</p>
+          </div>
+
+          <div class="rules-section">
+            <h3>玩家配置</h3>
+            <ul>
+              <li>人类玩家：1名</li>
+              <li>电脑对手数量：可配置 1~3 名，即总玩家数可为 2~4 人</li>
+              <li>每轮每位玩家获得 12 张手牌（从一副去掉大小王的 52 张扑克中抽取）</li>
+            </ul>
+          </div>
+
+          <div class="rules-section">
+            <h3>游戏流程（每轮）</h3>
+            <h4>1. 发牌</h4>
+            <p>每轮开始前彻底洗牌，根据当前玩家总数 N，为每位玩家发放 12 张牌。剩余牌（52 - N×12）本轮弃用。</p>
+            
+            <h4>2. 分组阶段</h4>
+            <p>每位玩家需将 12 张牌分成两份（每份 6 张），每份内部分为三个小组：</p>
+            <ul>
+              <li>1张牌组（单张组）</li>
+              <li>2张牌组（24点组）</li>
+              <li>3张牌组（比三张组）</li>
+            </ul>
+            <p>每位玩家共形成 6 个小组，各小组牌数固定，不可更改。所有手牌必须用完，不得剩余，小组之间牌不可重复。</p>
+            
+            <h4>3. 比较阶段</h4>
+            <p>所有玩家完成分组后，同时亮出各组的牌，对每一个小组（共6组）独立进行以下比较：</p>
+            
+            <div class="rules-subsection">
+              <h5>① 单张组</h5>
+              <p>按扑克点数大小排序，从大到小：A > K > Q > J > 10 > 9 > … > 2</p>
+              <p>花色大小为：黑桃 > 红桃 > 梅花 > 方片</p>
+              <p>点数相同则平局</p>
+            </div>
+            
+            <div class="rules-subsection">
+              <h5>② 24点组</h5>
+              <p>按两张牌的点数之和排序，和越大排名越高</p>
+              <p>点数相同，则比较花色，花色大小为：黑桃 > 红桃 > 梅花 > 方片</p>
+            </div>
+            
+            <div class="rules-subsection">
+              <h5>③ 比三张组</h5>
+              <p>按标准比三张牌型大小排序，优先级为：</p>
+              <ol>
+                <li>豹子（三张同点）</li>
+                <li>同花顺（同花且顺子）</li>
+                <li>同花（三张同花色）</li>
+                <li>顺子（点数连续，A可作为1或14，但不可循环，如QKA、A23合法）</li>
+                <li>对子（两张同点）</li>
+                <li>散牌（高牌）</li>
+              </ol>
+              <p>若牌型相同，则依次比较单张点数（从大到小）；若仍相同，则比较花色，花色大小为：黑桃 > 红桃 > 梅花 > 方片</p>
+            </div>
+          </div>
+
+          <div class="rules-section">
+            <h3>积分规则</h3>
+            <p>设有 P 名玩家（P = 2,3,4），每组根据排名分配积分：</p>
+            <ul>
+              <li>第一名获得 P-1 分</li>
+              <li>第二名获得 P-2 分</li>
+              <li>……</li>
+              <li>最后一名 0 分</li>
+            </ul>
+            <p class="rules-highlight">比三张组的得分翻倍（即第一名得 2×(P-1) 分，第二名得 2×(P-2) 分，以此类推）</p>
+            <p>每组独立计分，立即累加到玩家的累计总分中。</p>
+          </div>
+
+          <div class="rules-section">
+            <h3>轮次循环</h3>
+            <p>完成一轮所有 6 组的比较与计分后，若已进行轮数达到设定值，则游戏结束，显示最终排名；否则进入下一轮（重新洗牌、发牌、分组）。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+import { ref, computed } from 'vue'
+import gameStore from '../store/gameStore.js'
+import AIPlayer from '../utils/AIPlayer.js'
+
+export default {
+  name: 'GameMain',
+  setup() {
+    const selectedCardIndex = ref(null)
+    const draggingIndex = ref(null)
+    const sortMode = ref('rank')
+    const showRules = ref(false)
+    
+    const playerHand = computed(() => {
+      const player = gameStore.players.find(p => p.id === 'player')
+      return player ? player.hand : []
+    })
+
+    const remainingHandCards = computed(() => {
+      return playerHand.value.length
+    })
+
+    const sortModeText = computed(() => {
+      return sortMode.value === 'rank' ? '先点数后花色' : '先花色后点数'
+    })
+
+    const gameLogs = ref([
+      '初始化完成',
+      '等待分组...'
+    ])
+
+    const statusText = computed(() => {
+      if (gameStore.gamePhase === 'grouping') {
+        return gameStore.subRound === 1 ? '等待分组 (第1回合)' : '等待分组 (第2回合)'
+      } else if (gameStore.gamePhase === 'comparing') {
+        return '分组确认'
+      } else if (gameStore.gamePhase === 'roundResult') {
+        return '本轮结果'
+      }
+      return '就绪'
+    })
+
+    const hasConfirmed = computed(() => {
+      return gameStore.gamePhase === 'comparing' || gameStore.gamePhase === 'roundResult'
+    })
+
+    const canConfirm = computed(() => {
+      if (gameStore.gamePhase !== 'grouping') return false
+
+      const playerGroups = gameStore.playerGroups['player']
+      if (!playerGroups) return false
+
+      const subRoundIndex = gameStore.subRound === 1 ? 0 : 1
+      const singleCount = (playerGroups.single[subRoundIndex] || []).filter(c => c !== -1).length
+      const twentyFourPointCount = (playerGroups.twentyFourPoint[subRoundIndex] || []).filter(c => c !== -1).length
+      const threeCardCount = (playerGroups.threeCard[subRoundIndex] || []).filter(c => c !== -1).length
+
+      return singleCount >= 1 && twentyFourPointCount >= 2 && threeCardCount >= 3
+    })
+
+    const getGroupStatus = (groupType) => {
+      const playerGroups = gameStore.playerGroups['player']
+      if (!playerGroups) return { ready: false, count: 0, required: 0 }
+      
+      const subRoundIndex = gameStore.subRound === 1 ? 0 : 1
+      let count = 0
+      let required = 0
+      
+      if (groupType === 'single') {
+        count = (playerGroups.single[subRoundIndex] || []).filter(c => c !== -1).length
+        required = 1
+      } else if (groupType === 'twentyFourPoint') {
+        count = (playerGroups.twentyFourPoint[subRoundIndex] || []).filter(c => c !== -1).length
+        required = 2
+      } else if (groupType === 'threeCard') {
+        count = (playerGroups.threeCard[subRoundIndex] || []).filter(c => c !== -1).length
+        required = 3
+      }
+      
+      return { ready: count >= required, count, required }
+    }
+
+    const getPlayerGroupCards = (playerId, groupType) => {
+      const groups = gameStore.playerGroups[playerId]
+      if (!groups) return []
+      
+      const subRoundIndex = gameStore.subRound === 1 ? 0 : 1
+      
+      if (groupType === 'single') {
+        return groups.single[subRoundIndex] || []
+      } else if (groupType === 'twentyFourPoint') {
+        return groups.twentyFourPoint[subRoundIndex] || []
+      } else if (groupType === 'threeCard') {
+        return groups.threeCard[subRoundIndex] || []
+      }
+      return []
+    }
+
+    const getDisplayCards = (playerId, groupType, requiredCount) => {
+      const cards = getPlayerGroupCards(playerId, groupType)
+      return cards
+    }
+
+    const getPlayerScore = (playerId) => {
+      if (gameStore.subRound === 1) {
+        return gameStore.totalScores[playerId] || 0
+      } else {
+        return gameStore.totalScores[playerId] || 0
+      }
+    }
+
+    const getGroupScore = (playerId, groupType) => {
+      if (gameStore.gamePhase === 'roundResult') {
+        return gameStore.currentRoundGroupScores[playerId]?.[groupType] || 0
+      }
+      return 0
+    }
+
+    const getPlayerInitial = (player, index) => {
+      if (!player.isAI) return 'P1'
+      return 'P' + (index + 1)
+    }
+
+    const getSuitSymbol = (suit) => {
+      const symbols = {
+        'spades': '♠',
+        'hearts': '♥',
+        'clubs': '♣',
+        'diamonds': '♦'
+      }
+      return symbols[suit] || ''
+    }
+
+    const getCardColorClass = (card) => {
+      if (!card) return 'card-black'
+      return card.color === 'red' ? 'card-red' : 'card-black'
+    }
+
+    const handleCardClick = (card, index) => {
+      if (selectedCardIndex.value === index) {
+        selectedCardIndex.value = null
+      } else {
+        selectedCardIndex.value = index
+      }
+    }
+
+    const onZoneClick = (groupType) => {
+      if (selectedCardIndex.value === null) return
+      
+      const index = selectedCardIndex.value
+      const card = playerHand.value[index]
+      if (!card) return
+
+      const player = gameStore.players.find(p => p.id === 'player')
+      if (!player || !player.hand) return
+
+      let playerGroups = gameStore.playerGroups['player']
+      if (!playerGroups) {
+        gameStore.initPlayerGroups(gameStore.playerCount)
+        playerGroups = gameStore.playerGroups['player']
+      }
+
+      const subRoundIndex = gameStore.subRound === 1 ? 0 : 1
+      const targetArray = playerGroups[groupType][subRoundIndex]
+      const maxLength = groupType === 'single' ? 1 : (groupType === 'twentyFourPoint' ? 2 : 3)
+
+      const validCards = targetArray.filter(c => c !== -1)
+      const existingCards = [
+        ...playerGroups.single[0], ...playerGroups.single[1],
+        ...playerGroups.twentyFourPoint[0], ...playerGroups.twentyFourPoint[1],
+        ...playerGroups.threeCard[0], ...playerGroups.threeCard[1]
+      ].filter(c => c !== -1)
+      const isInGroup = existingCards.some(c => c.rank === card.rank && c.suit === card.suit)
+      
+      if (!isInGroup && validCards.length < maxLength) {
+        const emptyIndex = targetArray.findIndex(c => c === -1)
+        if (emptyIndex !== -1) {
+          targetArray[emptyIndex] = card
+        } else {
+          targetArray.push(card)
+        }
+        player.hand.splice(index, 1)
+        gameStore.playerGroups['player'] = playerGroups
+        selectedCardIndex.value = null
+      }
+    }
+
+    const onDragStart = (event, card, index) => {
+      draggingIndex.value = index
+      event.dataTransfer.setData('cardIndex', index)
+      event.dataTransfer.effectAllowed = 'move'
+    }
+
+    const onDragEnd = () => {
+      draggingIndex.value = null
+    }
+
+    const onDrop = (event, groupType) => {
+      const cardIndex = event.dataTransfer.getData('cardIndex')
+      if (cardIndex === '' || cardIndex === null) return
+      
+      const index = parseInt(cardIndex)
+      const card = playerHand.value[index]
+      if (!card) return
+
+      const player = gameStore.players.find(p => p.id === 'player')
+      if (!player || !player.hand) return
+
+      let playerGroups = gameStore.playerGroups['player']
+      if (!playerGroups) {
+        gameStore.initPlayerGroups(gameStore.playerCount)
+        playerGroups = gameStore.playerGroups['player']
+      }
+
+      const subRoundIndex = gameStore.subRound === 1 ? 0 : 1
+      const targetArray = playerGroups[groupType][subRoundIndex]
+      const maxLength = groupType === 'single' ? 1 : (groupType === 'twentyFourPoint' ? 2 : 3)
+
+      const validCards = targetArray.filter(c => c !== -1)
+      const existingCards = [
+        ...playerGroups.single[0], ...playerGroups.single[1],
+        ...playerGroups.twentyFourPoint[0], ...playerGroups.twentyFourPoint[1],
+        ...playerGroups.threeCard[0], ...playerGroups.threeCard[1]
+      ].filter(c => c !== -1)
+      const isInGroup = existingCards.some(c => c.rank === card.rank && c.suit === card.suit)
+      
+      if (!isInGroup && validCards.length < maxLength) {
+        const emptyIndex = targetArray.findIndex(c => c === -1)
+        if (emptyIndex !== -1) {
+          targetArray[emptyIndex] = card
+        } else {
+          targetArray.push(card)
+        }
+        player.hand.splice(index, 1)
+        gameStore.playerGroups['player'] = playerGroups
+      }
+
+      draggingIndex.value = null
+    }
+
+    const removeCardFromGroup = (playerId, groupType, cardIndex) => {
+      if (playerId !== 'player' || gameStore.gamePhase !== 'grouping') return
+
+      const player = gameStore.players.find(p => p.id === playerId)
+      if (!player || !player.hand) return
+
+      const playerGroups = gameStore.playerGroups[playerId]
+      if (!playerGroups || !playerGroups[groupType]) return
+
+      const subRoundIndex = gameStore.subRound === 1 ? 0 : 1
+      const groupArray = playerGroups[groupType][subRoundIndex]
+      if (cardIndex < 0 || cardIndex >= groupArray.length) return
+
+      const card = groupArray[cardIndex]
+      if (!card || card === -1) return
+
+      groupArray[cardIndex] = -1
+      player.hand.push(card)
+      gameStore.playerGroups[playerId] = playerGroups
+    }
+
+    const resetHand = () => {
+      gameStore.resetCurrentGroups()
+      selectedCardIndex.value = null
+    }
+
+    const toggleSort = () => {
+      const player = gameStore.players.find(p => p.id === 'player')
+      if (!player || !player.hand) return
+
+      const suitOrder = ['spades', 'hearts', 'clubs', 'diamonds']
+      const rankOrder = ['A', 'K', 'Q', 'J', '10', '9', '8', '7', '6', '5', '4', '3', '2']
+
+      if (sortMode.value === 'rank') {
+        player.hand.sort((a, b) => {
+          const rankDiff = rankOrder.indexOf(a.rank) - rankOrder.indexOf(b.rank)
+          if (rankDiff !== 0) return rankDiff
+          return suitOrder.indexOf(a.suit) - suitOrder.indexOf(b.suit)
+        })
+        sortMode.value = 'suit'
+      } else {
+        player.hand.sort((a, b) => {
+          const suitDiff = suitOrder.indexOf(a.suit) - suitOrder.indexOf(b.suit)
+          if (suitDiff !== 0) return suitDiff
+          return rankOrder.indexOf(a.rank) - rankOrder.indexOf(b.rank)
+        })
+        sortMode.value = 'rank'
+      }
+    }
+
+    const confirmGroup = () => {
+      if (!canConfirm.value) return
+      
+      const playerGroups = gameStore.playerGroups['player']
+      const subRoundIndex = gameStore.subRound === 1 ? 0 : 1
+      
+      const groups = {
+        single: playerGroups && playerGroups.single && playerGroups.single[subRoundIndex] ? playerGroups.single[subRoundIndex].filter(c => c !== -1) : [],
+        twentyFourPoint: playerGroups && playerGroups.twentyFourPoint && playerGroups.twentyFourPoint[subRoundIndex] ? playerGroups.twentyFourPoint[subRoundIndex].filter(c => c !== -1) : [],
+        threeCard: playerGroups && playerGroups.threeCard && playerGroups.threeCard[subRoundIndex] ? playerGroups.threeCard[subRoundIndex].filter(c => c !== -1) : []
+      }
+      
+      gameStore.submitPlayerGroups(groups)
+      gameStore.calculateRoundScores()
+    }
+
+    const handleNext = () => {
+      if (gameStore.subRound === 1) {
+        gameStore.prepareSecondRound()
+      } else {
+        if (gameStore.isGameOver()) {
+          gameStore.endGame()
+        } else {
+          gameStore.startNewRound()
+        }
+      }
+    }
+
+    return {
+      gameStore,
+      playerHand,
+      remainingHandCards,
+      sortModeText,
+      gameLogs,
+      statusText,
+      hasConfirmed,
+      canConfirm,
+      selectedCardIndex,
+      draggingIndex,
+      showRules,
+      getGroupStatus,
+      getPlayerGroupCards,
+      getDisplayCards,
+      getPlayerScore,
+      getGroupScore,
+      getPlayerInitial,
+      getSuitSymbol,
+      getCardColorClass,
+      handleCardClick,
+      onZoneClick,
+      onDragStart,
+      onDragEnd,
+      onDrop,
+      removeCardFromGroup,
+      resetHand,
+      toggleSort,
+      confirmGroup,
+      handleNext
+    }
+  }
+}
+</script>
+
+<style scoped>
+.game {
+  min-height: 100vh;
+  background: #0a0a0c;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  font-family: 'JetBrains Mono', 'Consolas', monospace;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 24px;
+  background: rgba(20, 20, 25, 0.9);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  position: relative;
+  z-index: 10;
+}
+
+.header-left, .header-right {
+  flex: 1;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.header-right {
+  text-align: right;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.logo-icon {
+  font-size: 18px;
+  color: #3b82f6;
+}
+
+.logo-text {
+  font-size: 18px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+  letter-spacing: 1px;
+}
+
+.header-center {
+  display: flex;
+  gap: 32px;
+}
+
+.stat-block {
+  text-align: center;
+}
+
+.stat-label {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.7);
+  letter-spacing: 1px;
+}
+
+.stat-value {
+  font-size: 24px;
+  color: #3b82f6;
+  font-weight: 600;
+}
+
+.stat-divider {
+  color: rgba(255, 255, 255, 0.35);
+  margin: 0 2px;
+}
+
+.sub-round {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.6);
+  margin-left: 4px;
+}
+
+.status-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: #3b82f6;
+  letter-spacing: 1px;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  background: #3b82f6;
+  border-radius: 50%;
+}
+
+.main-container {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 240px 1fr 240px;
+  gap: 16px;
+  padding: 16px;
+  overflow: hidden;
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sidebar-right {
+  
+}
+
+.sidebar-title {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.35);
+  letter-spacing: 1px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.title-line {
+  width: 16px;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.player-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.player-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px;
+  background: rgba(20, 20, 25, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: all 0.2s;
+}
+
+.player-card.is-me {
+  border-color: rgba(59, 130, 246, 0.3);
+  background: rgba(59, 130, 246, 0.05);
+}
+
+.player-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.player-avatar {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.player-card.is-me .player-avatar {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: rgba(59, 130, 246, 0.4);
+  color: #3b82f6;
+}
+
+.player-name {
+  font-size: 15px;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.player-status {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.player-score {
+  font-size: 20px;
+  color: #3b82f6;
+  font-weight: 600;
+}
+
+.log-list {
+  flex: 1;
+  overflow-y: auto;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.7);
+  line-height: 1.8;
+}
+
+.log-entry {
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.workbench {
+  display: grid;
+  grid-template-columns: 1fr 2fr 3fr;
+  gap: 12px;
+}
+
+.zone {
+  background: rgba(20, 20, 25, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  flex-direction: column;
+  min-height: 300px;
+  transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+.zone.zone-ready {
+  border-color: #22c55e;
+  box-shadow: 0 0 15px rgba(34, 197, 94, 0.2);
+}
+
+.zone::before {
+  content: attr(data-label);
+  position: absolute;
+  top: -10px;
+  left: 16px;
+  background: #0a0a0c;
+  padding: 0 8px;
+  font-size: 13px;
+  color: #3b82f6;
+  letter-spacing: 1px;
+}
+
+.zone-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 15px;
+  color: #3b82f6;
+}
+
+.zone-info {
+  padding: 8px 16px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.6);
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.zone-weight {
+  color: #3b82f6;
+}
+
+.zone-weight-highlight {
+  color: #f97316;
+}
+
+.zone-content {
+  flex: 1;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.zone-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  background: rgba(0, 87, 163, 0.3);
+  min-height: 44px;
+}
+
+.zone-row.is-player {
+  background: rgba(249, 115, 22, 0.3);
+}
+
+.zone-row.is-complete {
+  background: rgba(34, 197, 94, 0.3);
+}
+
+.zone-row-label {
+  width: 24px;
+  font-size: 13px;
+  color: #3b82f6;
+}
+
+.zone-row-score {
+  margin-left: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #22c55e;
+  min-width: 36px;
+  text-align: right;
+}
+
+.zone-cards {
+  display: flex;
+  gap: 4px;
+}
+
+.zone-card-mini {
+  padding: 4px 8px;
+  background: #cdcdcd;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 16px;
+  font-weight: bold;
+  width: 6em;
+  height: 30px;
+}
+
+.zone-card-mini.card-red {
+  color: #991b1b;
+}
+
+.zone-card-mini.card-black {
+  color: #000000;
+}
+
+.zone-card-mini.card-back {
+  background: linear-gradient(135deg, #1e3a5f 25%, #2563eb 25%, #2563eb 50%, #1e3a5f 50%, #1e3a5f 75%, #2563eb 75%);
+  background-size: 8px 8px;
+  color: transparent;
+  border-color: #3b82f6;
+}
+
+.zone-empty {
+  font-size: 13px;
+  color: #3b82f6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.hand-area {
+  background: rgba(20, 20, 25, 0.98);
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 16px 24px;
+}
+
+.hand-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.hand-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.hand-title {
+  font-size: 15px;
+  color: #3b82f6;
+  letter-spacing: 1px;
+}
+
+.hand-count {
+  font-size: 14px;
+  color: #3b82f6;
+}
+
+.btn-sort {
+  padding: 6px 16px;
+  font-size: 13px;
+  font-family: inherit;
+  letter-spacing: 1px;
+  background: transparent;
+  border: 1px solid rgba(59, 130, 246, 0.5);
+  color: #3b82f6;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-sort:hover {
+  background: rgba(59, 130, 246, 0.1);
+  border-color: #3b82f6;
+}
+
+.hand-cards {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  min-height: 100px;
+}
+
+.playing-card {
+  width: 72px;
+  height: 100px;
+  background: #cdcdcd;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  position: relative;
+  cursor: grab;
+  transition: all 0.2s;
+  user-select: none;
+}
+
+.playing-card:hover {
+  transform: translateY(-8px);
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+.playing-card.is-selected {
+  border-color: #3b82f6;
+  border-width: 3px;
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.5), inset 0 0 10px rgba(59, 130, 246, 0.1);
+  transform: translateY(-4px);
+}
+
+.playing-card.is-selected:hover {
+  transform: translateY(-8px);
+}
+
+.zone-clickable {
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.zone-clickable:hover {
+  background: rgba(59, 130, 246, 0.1);
+  box-shadow: inset 0 0 20px rgba(59, 130, 246, 0.1);
+}
+
+.playing-card.is-dragging {
+  opacity: 0.5;
+}
+
+.playing-card.card-red {
+  color: #ef4444;
+}
+
+.playing-card.card-black {
+  color: #000000;
+}
+
+.card-corner {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-size: 16px;
+  font-weight: bold;
+  line-height: 1.2;
+}
+
+.card-corner.top {
+  top: 4px;
+  left: 4px;
+}
+
+.card-corner.bottom {
+  bottom: 4px;
+  right: 4px;
+  transform: rotate(180deg);
+}
+
+.card-center {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 24px;
+}
+
+.hand-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.btn {
+  padding: 10px 24px;
+  font-size: 14px;
+  font-family: inherit;
+  letter-spacing: 1px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: rgba(255, 255, 255, 0.8);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn:hover {
+  border-color: rgba(255, 255, 255, 0.5);
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.btn-highlight {
+  background: #3b82f6;
+  border-color: #3b82f6;
+  color: #ffffff;
+}
+
+.btn-highlight:hover {
+  background: #06b6d4;
+  border-color: #06b6d4;
+}
+
+.btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.result-list {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.result-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 13px;
+}
+
+.result-item.header {
+  background: rgba(59, 130, 246, 0.1);
+  border-color: rgba(59, 130, 246, 0.2);
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.result-name {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.result-score {
+  color: #3b82f6;
+  font-weight: 500;
+}
+
+.result-total {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.result-actions {
+  padding: 12px;
+  display: flex;
+  justify-content: center;
+}
+
+.result-actions .btn {
+  width: 100%;
+}
+
+.rules-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 6px;
+  color: #3b82f6;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.rules-btn:hover {
+  background: rgba(59, 130, 246, 0.2);
+  border-color: rgba(59, 130, 246, 0.5);
+}
+
+.rules-icon {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(59, 130, 246, 0.2);
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.rules-text {
+  font-size: 13px;
+}
+
+.rules-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.rules-content {
+  background: #141419;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  max-width: 700px;
+  max-height: 80vh;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.rules-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.rules-header h2 {
+  margin: 0;
+  font-size: 20px;
+  color: rgba(255, 255, 255, 0.95);
+  font-weight: 600;
+}
+
+.rules-close {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 24px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.rules-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.rules-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+}
+
+.rules-body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.rules-body::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.rules-body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+}
+
+.rules-section {
+  margin-bottom: 24px;
+}
+
+.rules-section:last-child {
+  margin-bottom: 0;
+}
+
+.rules-section h3 {
+  margin: 0 0 12px 0;
+  font-size: 16px;
+  color: #3b82f6;
+  font-weight: 600;
+}
+
+.rules-section h4 {
+  margin: 16px 0 8px 0;
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 600;
+}
+
+.rules-section h5 {
+  margin: 12px 0 6px 0;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.8);
+  font-weight: 600;
+}
+
+.rules-section p {
+  margin: 0 0 8px 0;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.7);
+  line-height: 1.7;
+}
+
+.rules-section ul,
+.rules-section ol {
+  margin: 0 0 8px 0;
+  padding-left: 20px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.7);
+  line-height: 1.7;
+}
+
+.rules-section li {
+  margin-bottom: 4px;
+}
+
+.rules-subsection {
+  margin: 12px 0;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+}
+
+.rules-highlight {
+  padding: 10px 12px;
+  background: rgba(59, 130, 246, 0.1);
+  border-left: 3px solid #3b82f6;
+  border-radius: 4px;
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 500;
+}
+</style>
+
+--- src/components/MainMenu.vue ---
+<template>
+  <div class="menu">
+    <div class="bg-grid"></div>
+    
+    <div class="panel">
+      <div class="panel-header">
+        <div class="logo">
+          <span class="logo-icon">◈</span>
+          <span class="logo-text">三卡对决</span>
+        </div>
+        <div class="version">v1.0</div>
+      </div>
+      
+      <div class="panel-body">
+        <div class="config-group">
+          <div class="config-label">
+            <span class="label-dot"></span>
+            电脑玩家数量
+          </div>
+          <div class="slider-wrapper">
+            <input 
+              type="range" 
+              v-model="cpuCount" 
+              min="1" 
+              max="3" 
+              class="slider"
+              @change="updatePlayerCount"
+            />
+            <div class="slider-marks">
+              <span>1</span><span>2</span><span>3</span>
+            </div>
+          </div>
+          <div class="config-value">{{ cpuCount }} 人</div>
+        </div>
+        
+        <div class="config-group">
+          <div class="config-label">
+            <span class="label-dot"></span>
+            游戏轮数
+          </div>
+          <div class="slider-wrapper">
+            <input 
+              type="range" 
+              v-model="roundCount" 
+              min="3" 
+              max="7" 
+              class="slider"
+              @change="updateRoundCount"
+            />
+            <div class="slider-marks">
+              <span>3</span><span>5</span><span>7</span>
+            </div>
+          </div>
+          <div class="config-value">{{ roundCount }} 轮</div>
+        </div>
+      </div>
+      
+      <div class="panel-footer">
+        <button class="btn btn-primary" @click="startGame">
+          开始游戏
+        </button>
+        <button class="btn btn-secondary" @click="exitGame">
+          退出
+        </button>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+import { ref } from 'vue'
+import gameStore from '../store/gameStore.js'
+
+export default {
+  name: 'MainMenu',
+  setup() {
+    const cpuCount = ref(1)
+    const roundCount = ref(5)
+
+    const updatePlayerCount = () => {
+      gameStore.playerCount = Number(cpuCount.value) + 1
+    }
+
+    const updateRoundCount = () => {
+      gameStore.totalRounds = Number(roundCount.value)
+    }
+
+    const startGame = () => {
+      gameStore.initGame(Number(cpuCount.value) + 1, Number(roundCount.value))
+      gameStore.startNewRound()
+    }
+
+    const exitGame = () => {
+      if (confirm('确定要退出游戏吗？')) {
+        window.close()
+      }
+    }
+
+    return {
+      cpuCount,
+      roundCount,
+      updatePlayerCount,
+      updateRoundCount,
+      startGame,
+      exitGame
+    }
+  }
+}
+</script>
+
+<style scoped>
+.menu {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  background: #0a0a0c;
+  position: relative;
+  font-family: 'JetBrains Mono', 'Consolas', monospace;
+}
+
+.bg-grid {
+  position: absolute;
+  inset: 0;
+  background-image: 
+    linear-gradient(rgba(96, 165, 250, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(96, 165, 250, 0.06) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.panel {
+  position: relative;
+  width: 380px;
+  background: rgba(20, 20, 25, 0.85);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.logo-icon {
+  font-size: 20px;
+  color: #2563eb;
+}
+
+.logo-text {
+  font-size: 16px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+  letter-spacing: 2px;
+}
+
+.version {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.panel-body {
+  padding: 32px 24px;
+}
+
+.config-group {
+  margin-bottom: 28px;
+}
+
+.config-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.55);
+  margin-bottom: 14px;
+  letter-spacing: 1px;
+}
+
+.label-dot {
+  width: 6px;
+  height: 6px;
+  background: #2563eb;
+  border-radius: 50%;
+}
+
+.slider-wrapper {
+  padding: 0 2px;
+}
+
+.slider {
+  width: 100%;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  background: #2563eb;
+  border-radius: 2px;
+  cursor: pointer;
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.4);
+  transition: transform 0.15s;
+}
+
+.slider::-webkit-slider-thumb:hover {
+  transform: scale(1.1);
+}
+
+.slider-marks {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.config-value {
+  text-align: center;
+  font-size: 24px;
+  font-weight: 300;
+  color: #2563eb;
+  margin-top: 12px;
+  letter-spacing: 2px;
+}
+
+.panel-footer {
+  display: flex;
+  gap: 12px;
+  padding: 20px 24px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.btn {
+  flex: 1;
+  padding: 14px 20px;
+  font-size: 12px;
+  font-family: inherit;
+  letter-spacing: 2px;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-primary {
+  background: #2563eb;
+  color: #0a0a0c;
+  font-weight: 600;
+}
+
+.btn-primary:hover {
+  background: #2563eb;
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.4);
+}
+
+.btn-secondary {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.btn-secondary:hover {
+  color: rgba(255, 255, 255, 0.85);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+</style>
+
+--- src/components/ResultDisplay.vue ---
+<template>
+  <div class="result">
+    <div class="bg-grid"></div>
+    
+    <div class="panel">
+      <div v-if="gameStore.gamePhase === 'roundResult'" class="round-result">
+        <div class="panel-header">
+          <div class="panel-title">第 {{ gameStore.currentRound }} 轮结算</div>
+        </div>
+        
+        <div class="panel-body">
+          <div class="score-list">
+            <div 
+              v-for="player in sortedPlayers" 
+              :key="player.id" 
+              class="score-item"
+              :class="{ 'is-winner': player.roundScore > 0 }"
+            >
+              <div class="score-info">
+                <div class="score-name">{{ player.name }}</div>
+                <div class="score-total">累计 {{ gameStore.totalScores[player.id] }} 分</div>
+              </div>
+              <div class="score-change">+{{ player.roundScore }}</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-footer">
+          <button class="btn btn-highlight" @click="nextRound">
+            {{ gameStore.isGameOver() ? '查看结果' : '下一轮' }}
+          </button>
+        </div>
+      </div>
+
+      <div v-else-if="gameStore.gamePhase === 'gameOver'" class="final-result">
+        <div class="panel-header">
+          <div class="panel-title">{{ gameStore.winner.isTie ? '平局' : '最终结果' }}</div>
+        </div>
+        
+        <div class="panel-body">
+          <div v-if="!gameStore.winner.isTie" class="winner-block">
+            <div class="winner-label">冠军</div>
+            <div class="winner-name">{{ gameStore.winner.winner.name }}</div>
+            <div class="winner-score">{{ gameStore.winner.winner.score || gameStore.totalScores[gameStore.winner.winner.id] }} 分</div>
+          </div>
+
+          <div class="rankings">
+            <div class="rankings-title">最终排名</div>
+            <div 
+              v-for="ranking in gameStore.winner.rankings" 
+              :key="ranking.player.id"
+              class="ranking-item"
+              :class="{ 'top-3': ranking.rank <= 3 }"
+            >
+              <div class="rank-num">{{ ranking.rank }}</div>
+              <div class="rank-name">{{ ranking.player.name }}</div>
+              <div class="rank-score">{{ ranking.score }} 分</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-footer">
+          <button class="btn btn-highlight" @click="backToMenu">
+            返回主菜单
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+import { computed } from 'vue'
+import gameStore from '../store/gameStore.js'
+
+export default {
+  name: 'ResultDisplay',
+  setup() {
+    const sortedPlayers = computed(() => {
+      return [...gameStore.players]
+        .map(p => ({
+          ...p,
+          roundScore: gameStore.roundScores[p.id] || 0
+        }))
+        .sort((a, b) => b.roundScore - a.roundScore)
+    })
+
+    const nextRound = () => {
+      if (gameStore.isGameOver()) {
+        gameStore.endGame()
+      } else {
+        gameStore.startNewRound()
+      }
+    }
+
+    const backToMenu = () => {
+      gameStore.reset()
+    }
+
+    return {
+      gameStore,
+      sortedPlayers,
+      nextRound,
+      backToMenu
+    }
+  }
+}
+</script>
+
+<style scoped>
+.result {
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: #0a0a0c;
+  position: relative;
+  font-family: 'JetBrains Mono', 'Consolas', monospace;
+}
+
+.bg-grid {
+  position: absolute;
+  inset: 0;
+  background-image: 
+    linear-gradient(rgba(96, 165, 250, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(96, 165, 250, 0.04) 1px, transparent 1px);
+  background-size: 20px 20px;
+  pointer-events: none;
+}
+
+.panel {
+  position: relative;
+  width: 420px;
+  background: rgba(20, 20, 25, 0.9);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
+}
+
+.panel-header {
+  padding: 20px 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.panel-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.85);
+  letter-spacing: 2px;
+  text-align: center;
+}
+
+.panel-body {
+  padding: 24px;
+}
+
+.panel-footer {
+  padding: 16px 24px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  justify-content: center;
+}
+
+.score-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.score-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.score-item.is-winner {
+  background: rgba(59, 130, 246, 0.05);
+  border-color: rgba(59, 130, 246, 0.2);
+}
+
+.score-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.score-name {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.score-total {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.score-change {
+  font-size: 20px;
+  color: #3b82f6;
+  font-weight: 300;
+}
+
+.winner-block {
+  text-align: center;
+  padding: 24px;
+  background: rgba(59, 130, 246, 0.05);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  margin-bottom: 24px;
+}
+
+.winner-label {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+  letter-spacing: 2px;
+  margin-bottom: 8px;
+}
+
+.winner-name {
+  font-size: 24px;
+  color: #3b82f6;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.winner-score {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.rankings-title {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.35);
+  letter-spacing: 1px;
+  margin-bottom: 12px;
+  text-align: center;
+}
+
+.rankings {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ranking-item {
+  display: flex;
+  align-items: center;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.ranking-item.top-3 {
+  background: rgba(59, 130, 246, 0.03);
+}
+
+.rank-num {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  margin-right: 12px;
+}
+
+.ranking-item:nth-child(2) .rank-num {
+  background: rgba(255, 215, 0, 0.15);
+  border-color: rgba(255, 215, 0, 0.3);
+  color: #ffd700;
+}
+
+.ranking-item:nth-child(3) .rank-num {
+  background: rgba(192, 192, 192, 0.15);
+  border-color: rgba(192, 192, 192, 0.3);
+  color: #c0c0c0;
+}
+
+.ranking-item:nth-child(4) .rank-num {
+  background: rgba(205, 127, 50, 0.15);
+  border-color: rgba(205, 127, 50, 0.3);
+  color: #cd7f32;
+}
+
+.rank-name {
+  flex: 1;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.rank-score {
+  font-size: 13px;
+  color: #3b82f6;
+}
+
+.btn {
+  padding: 14px 40px;
+  font-size: 12px;
+  font-family: inherit;
+  letter-spacing: 2px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn:hover {
+  border-color: rgba(255, 255, 255, 0.3);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.btn-highlight {
+  background: #3b82f6;
+  border-color: #3b82f6;
+  color: #0a0a0c;
+}
+
+.btn-highlight:hover {
+  background: #06b6d4;
+  border-color: #06b6d4;
+}
+</style>
+
+--- src/main.js ---
+import { createApp } from 'vue'
+import App from './App.vue'
+import './style.css'
+
+createApp(App).mount('#app')
+
+--- src/store/gameStore.js ---
+import Deck from '../utils/Deck.js'
+import AIPlayer from '../utils/AIPlayer.js'
+import RuleEvaluator from '../utils/RuleEvaluator.js'
+import { reactive, readonly } from 'vue'
+
+const state = reactive({
+  playerCount: 2,
+  totalRounds: 5,
+  currentRound: 0,
+  subRound: 1,
+  players: [],
+  playerGroups: {},
+  roundScores: {},
+  tempRoundScores: {},
+  firstRoundGroupScores: {},
+  groupScores: {},
+  currentRoundGroupScores: {},
+  totalScores: {},
+  gamePhase: 'menu',
+  winner: null,
+  playerHandBackup: []
+})
+
+class GameStore {
+  constructor() {
+  }
+
+  get playerCount() { return state.playerCount }
+  set playerCount(v) { state.playerCount = v }
+
+  get totalRounds() { return state.totalRounds }
+  set totalRounds(v) { state.totalRounds = v }
+
+  get currentRound() { return state.currentRound }
+  set currentRound(v) { state.currentRound = v }
+
+  get subRound() { return state.subRound }
+  set subRound(v) { state.subRound = v }
+
+  get players() { return state.players }
+  set players(v) { state.players = v }
+
+  get playerGroups() { return state.playerGroups }
+  set playerGroups(v) { state.playerGroups = v }
+
+  get roundScores() { return state.roundScores }
+  set roundScores(v) { state.roundScores = v }
+
+  get tempRoundScores() { return state.tempRoundScores }
+  set tempRoundScores(v) { state.tempRoundScores = v }
+
+  get firstRoundGroupScores() { return state.firstRoundGroupScores }
+  set firstRoundGroupScores(v) { state.firstRoundGroupScores = v }
+
+  get groupScores() { return state.groupScores }
+  set groupScores(v) { state.groupScores = v }
+
+  get currentRoundGroupScores() { return state.currentRoundGroupScores }
+  set currentRoundGroupScores(v) { state.currentRoundGroupScores = v }
+
+  get totalScores() { return state.totalScores }
+  set totalScores(v) { state.totalScores = v }
+
+  get gamePhase() { return state.gamePhase }
+  set gamePhase(v) { state.gamePhase = v }
+
+  get winner() { return state.winner }
+  set winner(v) { state.winner = v }
+
+  reset() {
+    state.playerCount = 2
+    state.totalRounds = 5
+    state.currentRound = 0
+    state.subRound = 1
+    state.players.length = 0
+    state.players.push({ id: 'player', name: '玩家', isAI: false })
+    state.playerGroups = {}
+    state.roundScores = {}
+    state.tempRoundScores = {}
+    state.firstRoundGroupScores = {}
+    state.groupScores = {}
+    state.currentRoundGroupScores = {}
+    state.totalScores = {}
+    state.gamePhase = 'menu'
+    state.winner = null
+    state.playerHandBackup = []
+  }
+
+  createDeck() {
+    return new Deck()
+  }
+
+  initPlayerGroups(playerCount) {
+    this.playerGroups = {}
+    
+    const playerIds = ['player']
+    for (let i = 1; i < playerCount; i++) {
+      playerIds.push(`cpu${i}`)
+    }
+    
+    playerIds.forEach(id => {
+      this.playerGroups[id] = {
+        single: [[-1], [-1]],
+        twentyFourPoint: [[-1, -1], [-1, -1]],
+        threeCard: [[-1, -1, -1], [-1, -1, -1]]
+      }
+    })
+  }
+
+  initGame(playerCount, totalRounds) {
+    this.playerCount = playerCount
+    this.totalRounds = totalRounds
+    this.currentRound = 0
+    state.players.length = 0
+    state.playerGroups = {}
+    state.roundScores = {}
+    state.totalScores = {}
+
+    state.players.push({ id: 'player', name: '玩家', isAI: false })
+
+    for (let i = 1; i < playerCount; i++) {
+      state.players.push({ id: `cpu${i}`, name: `电脑${i}`, isAI: true })
+    }
+
+    state.players.forEach(p => {
+      state.totalScores[p.id] = 0
+    })
+
+    this.initPlayerGroups(playerCount)
+    this.gamePhase = 'grouping'
+  }
+
+  startNewRound() {
+    this.currentRound++
+    this.subRound = 1
+    const deck = this.createDeck()
+    deck.shuffle()
+    this.initPlayerGroups(this.players.length)
+    this.roundScores = {}
+    this.tempRoundScores = {}
+    this.firstRoundGroupScores = {}
+    this.groupScores = {}
+    this.currentRoundGroupScores = {}
+
+    const suitOrder = ['spades', 'hearts', 'clubs', 'diamonds']
+    const rankOrder = ['A', 'K', 'Q', 'J', '10', '9', '8', '7', '6', '5', '4', '3', '2']
+
+    this.players.forEach(player => {
+      const hand = deck.drawMultiple(12)
+      hand.sort((a, b) => {
+        const suitDiff = suitOrder.indexOf(a.suit) - suitOrder.indexOf(b.suit)
+        if (suitDiff !== 0) return suitDiff
+        return rankOrder.indexOf(a.rank) - rankOrder.indexOf(b.rank)
+      })
+      player.hand = hand
+    })
+
+    state.playerHandBackup = JSON.parse(JSON.stringify(this.players.map(p => p.hand)))
+
+    this.gamePhase = 'grouping'
+  }
+
+  resetCurrentGroups() {
+    const subRoundIndex = this.subRound === 1 ? 0 : 1
+
+    const player = this.players.find(p => p.id === 'player')
+    if (player && player.hand) {
+      const usedCards = [
+        ...(this.playerGroups['player'].single[subRoundIndex] || []),
+        ...(this.playerGroups['player'].twentyFourPoint[subRoundIndex] || []),
+        ...(this.playerGroups['player'].threeCard[subRoundIndex] || [])
+      ].filter(c => c !== -1)
+      
+      const usedCardKeys = new Set(usedCards.map(c => c.rank + c.suit))
+      player.hand = player.hand.filter(c => !usedCardKeys.has(c.rank + c.suit))
+      usedCards.forEach(card => {
+        if (!player.hand.some(h => h.rank === card.rank && h.suit === card.suit)) {
+          player.hand.push(card)
+        }
+      })
+    }
+
+    this.playerGroups['player'] = {
+      single: [[-1], [-1]],
+      twentyFourPoint: [[-1, -1], [-1, -1]],
+      threeCard: [[-1, -1, -1], [-1, -1, -1]]
+    }
+
+    this.players.forEach(player => {
+      if (player.isAI) {
+        this.playerGroups[player.id] = {
+          single: [[-1], [-1]],
+          twentyFourPoint: [[-1, -1], [-1, -1]],
+          threeCard: [[-1, -1, -1], [-1, -1, -1]]
+        }
+      }
+    })
+  }
+
+  submitPlayerGroups(groups) {
+    const subRoundIndex = this.subRound === 1 ? 0 : 1
+    
+    if (!this.playerGroups['player']) {
+      this.playerGroups['player'] = {
+        single: [[-1], [-1]],
+        twentyFourPoint: [[-1, -1], [-1, -1]],
+        threeCard: [[-1, -1, -1], [-1, -1, -1]]
+      }
+    }
+    
+    this.playerGroups['player'].single[subRoundIndex] = groups.single.length > 0 ? [groups.single[0]] : [-1]
+    this.playerGroups['player'].twentyFourPoint[subRoundIndex] = [groups.twentyFourPoint[0] || -1, groups.twentyFourPoint[1] || -1]
+    this.playerGroups['player'].threeCard[subRoundIndex] = [groups.threeCard[0] || -1, groups.threeCard[1] || -1, groups.threeCard[2] || -1]
+
+    this.players.forEach(player => {
+      if (player.isAI) {
+        if (!this.playerGroups[player.id]) {
+          this.playerGroups[player.id] = {
+            single: [[-1], [-1]],
+            twentyFourPoint: [[-1, -1], [-1, -1]],
+            threeCard: [[-1, -1, -1], [-1, -1, -1]]
+          }
+        }
+        
+        const groups = AIPlayer.decide(player.hand, 'enumerate')
+        
+        this.playerGroups[player.id].single[subRoundIndex] = [groups.single[0] || -1]
+        this.playerGroups[player.id].twentyFourPoint[subRoundIndex] = [groups.twentyFourPoint[0] || -1, groups.twentyFourPoint[1] || -1]
+        this.playerGroups[player.id].threeCard[subRoundIndex] = [groups.threeCard[0] || -1, groups.threeCard[1] || -1, groups.threeCard[2] || -1]
+
+        const usedCards = [...groups.single, ...groups.twentyFourPoint, ...groups.threeCard]
+        player.hand = player.hand.filter(c =>
+          !usedCards.some(used => used.rank === c.rank && used.suit === c.suit)
+        )
+      }
+    })
+
+    this.gamePhase = 'comparing'
+  }
+
+  calculateRoundScores() {
+    if (this.subRound === 2) {
+      this.firstRoundGroupScores = JSON.parse(JSON.stringify(this.groupScores))
+    }
+
+    this.groupScores = {}
+    this.players.forEach(p => {
+      this.groupScores[p.id] = { single: 0, twentyFourPoint: 0, threeCard: 0 }
+    })
+
+    this.currentRoundGroupScores = {}
+    this.players.forEach(p => {
+      this.currentRoundGroupScores[p.id] = { single: 0, twentyFourPoint: 0, threeCard: 0 }
+    })
+    
+    this.roundScores = {}
+    this.players.forEach(p => {
+      this.roundScores[p.id] = 0
+    })
+
+    const groupTypes = [
+      { key: 'single', type: 'single', isDouble: false },
+      { key: '24point', type: '24point', isDouble: false },
+      { key: 'threeCard', type: 'threecard', isDouble: true }
+    ]
+
+    groupTypes.forEach(gt => {
+      const playersData = this.players.map(p => {
+        let cards = []
+        const subRoundIndex = this.subRound === 1 ? 0 : 1
+        
+        if (gt.key === 'single') {
+          cards = (this.playerGroups[p.id]?.single[subRoundIndex] || []).filter(c => c !== -1)
+        } else if (gt.key === '24point') {
+          cards = (this.playerGroups[p.id]?.twentyFourPoint[subRoundIndex] || []).filter(c => c !== -1)
+        } else if (gt.key === 'threeCard') {
+          cards = (this.playerGroups[p.id]?.threeCard[subRoundIndex] || []).filter(c => c !== -1)
+        }
+        return { playerId: p.id, cards }
+      })
+
+      const validPlayersData = playersData.filter(pd => pd.cards.length > 0)
+      
+      if (validPlayersData.length === 0) return
+
+      const ranks = RuleEvaluator.calculateGroupRank(validPlayersData, gt.type)
+
+      ranks.forEach(r => {
+        const score = RuleEvaluator.calculateScore(r.rank, this.playerCount, gt.isDouble)
+        
+        this.roundScores[r.playerId] = (this.roundScores[r.playerId] || 0) + score
+        
+        const groupKey = gt.key === '24point' ? 'twentyFourPoint' : gt.key
+        this.currentRoundGroupScores[r.playerId][groupKey] = score
+        this.groupScores[r.playerId][groupKey] = score
+      })
+    })
+
+    if (this.subRound === 2) {
+      this.players.forEach(p => {
+        const first = this.firstRoundGroupScores[p.id] || { single: 0, twentyFourPoint: 0, threeCard: 0 }
+        this.groupScores[p.id].single += first.single
+        this.groupScores[p.id].twentyFourPoint += first.twentyFourPoint
+        this.groupScores[p.id].threeCard += first.threeCard
+      })
+    }
+
+    if (this.subRound === 1) {
+      this.tempRoundScores = { ...this.roundScores }
+    } else {
+      this.players.forEach(p => {
+        const totalScore = (this.tempRoundScores[p.id] || 0) + (this.roundScores[p.id] || 0)
+        this.totalScores[p.id] += totalScore
+      })
+    }
+
+    this.gamePhase = 'roundResult'
+  }
+
+  isGameOver() {
+    return this.currentRound >= this.totalRounds
+  }
+
+  getFinalResult() {
+    const sortedPlayers = [...this.players].sort((a, b) =>
+      this.totalScores[b.id] - this.totalScores[a.id]
+    )
+
+    const winner = sortedPlayers[0]
+    const isTie = sortedPlayers.length > 1 &&
+      this.totalScores[sortedPlayers[0].id] === this.totalScores[sortedPlayers[1].id]
+
+    return {
+      winner,
+      isTie,
+      rankings: sortedPlayers.map((p, index) => ({
+        rank: index + 1,
+        player: p,
+        score: this.totalScores[p.id]
+      }))
+    }
+  }
+
+  endGame() {
+    this.gamePhase = 'gameOver'
+    this.winner = this.getFinalResult()
+  }
+
+  validateGroups(groups) {
+    const requiredCards = {
+      single: 1,
+      twentyFourPoint: 2,
+      threeCard: 3
+    }
+
+    const singleCount = (groups.single || []).filter(c => c !== -1).length
+    const twentyFourPointCount = (groups.twentyFourPoint || []).filter(c => c !== -1).length
+    const threeCardCount = (groups.threeCard || []).filter(c => c !== -1).length
+
+    if (singleCount !== requiredCards.single) {
+      return { valid: false, error: `单张组需要${requiredCards.single}张牌，当前${singleCount}张` }
+    }
+    if (twentyFourPointCount !== requiredCards.twentyFourPoint) {
+      return { valid: false, error: `24点组需要${requiredCards.twentyFourPoint}张牌，当前${twentyFourPointCount}张` }
+    }
+    if (threeCardCount !== requiredCards.threeCard) {
+      return { valid: false, error: `比三张组需要${requiredCards.threeCard}张牌，当前${threeCardCount}张` }
+    }
+
+    const allCards = [
+      ...groups.single,
+      ...groups.twentyFourPoint,
+      ...groups.threeCard
+    ].filter(c => c !== -1)
+    
+    const uniqueCards = new Set(allCards.map(c => c.rank + c.suit))
+    if (uniqueCards.size !== 6) {
+      return { valid: false, error: `需要6张不同的牌，当前${uniqueCards.size}张` }
+    }
+
+    return { valid: true, error: null }
+  }
+
+  prepareSecondRound() {
+    const player = this.players.find(p => p.id === 'player')
+    if (player && player.hand) {
+      const usedCards = [
+        ...(this.playerGroups['player'].single[0] || []),
+        ...(this.playerGroups['player'].twentyFourPoint[0] || []),
+        ...(this.playerGroups['player'].threeCard[0] || [])
+      ].filter(c => c !== -1)
+      
+      const usedCardKeys = new Set(usedCards.map(c => c.rank + c.suit))
+      player.hand = player.hand.filter(c => !usedCardKeys.has(c.rank + c.suit))
+    }
+
+    this.players.forEach(player => {
+      if (player.isAI && player.hand) {
+        const usedCards = [
+          ...(this.playerGroups[player.id].single[0] || []),
+          ...(this.playerGroups[player.id].twentyFourPoint[0] || []),
+          ...(this.playerGroups[player.id].threeCard[0] || [])
+        ].filter(c => c !== -1)
+        
+        const usedCardKeys = new Set(usedCards.map(c => c.rank + c.suit))
+        player.hand = player.hand.filter(c => !usedCardKeys.has(c.rank + c.suit))
+      }
+    })
+
+    this.subRound = 2
+    this.gamePhase = 'grouping'
+  }
+}
+
+const gameStore = new GameStore()
+
+export default gameStore
+
+--- src/style.css ---
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
+  background: linear-gradient(135deg, #1a472a 0%, #2d5a3f 50%, #1a472a 100%);
+  min-height: 100vh;
+  color: #fff;
+}
+
+#app {
+  width: 100%;
+  min-height: 100vh;
+}
+
+--- src/utils/AIPlayer.js ---
+import Card from './Card.js'
+import RuleEvaluator from './RuleEvaluator.js'
+
+/**
+ * AI对手类
+ * 使用枚举算法实现最优分组策略
+ */
+class AIPlayer {
+  /**
+   * 生成数组的所有组合
+   * @param {Array} arr 输入数组
+   * @param {number} k 组合大小
+   * @returns {Array} 所有组合的数组
+   */
+  static combinations(arr, k) {
+    const result = []
+    if (k === 0) {
+      result.push([])
+      return result
+    }
+    if (k === arr.length) {
+      result.push([...arr])
+      return result
+    }
+    if (k > arr.length) {
+      return result
+    }
+
+    function helper(start, current) {
+      if (current.length === k) {
+        result.push([...current])
+        return
+      }
+      for (let i = start; i < arr.length; i++) {
+        current.push(arr[i])
+        helper(i + 1, current)
+        current.pop()
+      }
+    }
+
+    helper(0, [])
+    return result
+  }
+
+  /**
+   * 评估分组分数
+   * @param {Card[]} singleCard 单张组
+   * @param {Card[]} twentyFourCards 24点组（2张）
+   * @param {Card[]} pokerCards 炸金花组（3张）
+   * @returns {number} 总分
+   */
+  static evaluateGroup(singleCard, twentyFourCards, pokerCards) {
+    if (!singleCard || singleCard.length === 0 || !singleCard[0]) return 0
+    if (!twentyFourCards || twentyFourCards.length < 2 || !twentyFourCards[0] || !twentyFourCards[1]) return 0
+    if (!pokerCards || pokerCards.length < 3 || !pokerCards[0] || !pokerCards[1] || !pokerCards[2]) return 0
+
+    const scoreSingle = RuleEvaluator.scoreSingle(singleCard[0])
+    const score24 = RuleEvaluator.score24(twentyFourCards[0], twentyFourCards[1])
+    const scorePoker = RuleEvaluator.scorePoker(pokerCards[0], pokerCards[1], pokerCards[2])
+
+    return scoreSingle + score24 + 2 * scorePoker
+  }
+
+  /**
+   * 枚举最优分组（上半回合：12张牌选6张）
+   * @param {Card[]} hand 玩家手牌（12张）
+   * @returns {Object} 最优分组结果
+   */
+  static enumerateBestGroup(hand) {
+    if (hand.length === 6) {
+      return this.enumerateSixCards(hand)
+    }
+
+    const sixCardCombinations = this.combinations(hand, 6)
+    
+    let bestScore = -Infinity
+    let bestGroup = null
+    let bestCombination = null
+
+    for (const combination of sixCardCombinations) {
+      const group = this.enumerateSixCards(combination)
+      if (group) {
+        const score = this.evaluateGroup(
+          group.single,
+          group.twentyFourPoint,
+          group.threeCard
+        )
+        
+        if (score > bestScore) {
+          bestScore = score
+          bestGroup = group
+          bestCombination = combination
+        }
+      }
+    }
+
+    if (!bestGroup) {
+      return this.smartStrategy(hand)
+    }
+
+    const remainingCards = hand.filter(card => 
+      !bestCombination.some(c => c.rank === card.rank && c.suit === card.suit)
+    )
+
+    return {
+      single: bestGroup.single,
+      twentyFourPoint: bestGroup.twentyFourPoint,
+      threeCard: bestGroup.threeCard,
+      remainingCards: remainingCards
+    }
+  }
+
+  /**
+   * 枚举6张牌的所有可能分配
+   * @param {Card[]} sixCards 6张牌
+   * @returns {Object} 最优分组
+   */
+  static enumerateSixCards(sixCards) {
+    const singleCombinations = this.combinations(sixCards, 1)
+    
+    let bestScore = -Infinity
+    let bestGroup = null
+
+    for (const singleCard of singleCombinations) {
+      const remainingFor24 = sixCards.filter(card => 
+        !singleCard.some(c => c.rank === card.rank && c.suit === card.suit)
+      )
+      
+      const twentyFourCombinations = this.combinations(remainingFor24, 2)
+      
+      for (const twentyFourCards of twentyFourCombinations) {
+        const pokerCards = remainingFor24.filter(card => 
+          !twentyFourCards.some(c => c.rank === card.rank && c.suit === card.suit)
+        )
+
+        if (pokerCards.length !== 3) continue
+
+        const score = this.evaluateGroup(singleCard, twentyFourCards, pokerCards)
+        
+        if (score > bestScore) {
+          bestScore = score
+          bestGroup = {
+            single: [singleCard[0]],
+            twentyFourPoint: [twentyFourCards[0], twentyFourCards[1]],
+            threeCard: [pokerCards[0], pokerCards[1], pokerCards[2]]
+          }
+        }
+      }
+    }
+
+    return bestGroup
+  }
+
+  /**
+   * 智能分组策略（备用）
+   * @param {Card[]} hand 玩家手牌
+   * @returns {Object} 分组结果
+   */
+  static smartStrategy(hand) {
+    const sorted = [...hand].sort((a, b) => b.rankValue - a.rankValue)
+    
+    const singleCards = []
+    const twoCards = []
+    const threeCards = []
+    const remaining = [...sorted]
+
+    const bestSingle = this._findBestSingleCard(remaining)
+    singleCards.push(bestSingle)
+    remaining.splice(remaining.indexOf(bestSingle), 1)
+
+    const bestTwoCard = this._findBestTwoCards(remaining)
+    twoCards.push(...bestTwoCard)
+    bestTwoCard.forEach(c => remaining.splice(remaining.indexOf(c), 1))
+
+    const bestThreeCard = this._findBestThreeCards(remaining)
+    threeCards.push(...bestThreeCard)
+    bestThreeCard.forEach(c => remaining.splice(remaining.indexOf(c), 1))
+
+    const secondSingle = this._findBestSingleCard(remaining)
+    singleCards.push(secondSingle)
+    remaining.splice(remaining.indexOf(secondSingle), 1)
+
+    const secondTwoCard = this._findBestTwoCards(remaining)
+    twoCards.push(...secondTwoCard)
+    bestTwoCard.forEach(c => remaining.splice(remaining.indexOf(c), 1))
+
+    const secondThreeCard = this._findBestThreeCards(remaining)
+    threeCards.push(...secondThreeCard)
+
+    return {
+      single: [singleCards[0], singleCards[1]],
+      twentyFourPoint: [twoCards[0], twoCards[1], twoCards[2], twoCards[3]],
+      threeCard: [threeCards[0], threeCards[1], threeCards[2], threeCards[3], threeCards[4], threeCards[5]],
+      remainingCards: remaining
+    }
+  }
+
+  /**
+   * 找出最佳单张牌
+   * @param {Card[]} cards 可选牌
+   * @returns {Card|null}
+   */
+  static _findBestSingleCard(cards) {
+    if (!cards || cards.length === 0) return null
+    return cards.reduce((best, card) => 
+      card.rankValue > best.rankValue ? card : best
+    )
+  }
+
+  /**
+   * 找出最佳两张牌
+   * @param {Card[]} cards 可选牌
+   * @returns {Card[]}
+   */
+  static _findBestTwoCards(cards) {
+    if (!cards || cards.length < 2) return []
+    let bestPair = []
+    let bestSum = 0
+
+    for (let i = 0; i < cards.length; i++) {
+      for (let j = i + 1; j < cards.length; j++) {
+        const sum = cards[i].rankValue + cards[j].rankValue
+        if (sum > bestSum) {
+          bestSum = sum
+          bestPair = [cards[i], cards[j]]
+        }
+      }
+    }
+    return bestPair
+  }
+
+  /**
+   * 找出最佳三张牌
+   * @param {Card[]} cards 可选牌
+   * @returns {Card[]}
+   */
+  static _findBestThreeCards(cards) {
+    if (!cards || cards.length < 3) return []
+    let bestThree = []
+    let bestType = { priority: 0 }
+
+    for (let i = 0; i < cards.length; i++) {
+      for (let j = i + 1; j < cards.length; j++) {
+        for (let k = j + 1; k < cards.length; k++) {
+          const type = RuleEvaluator.getThreeCardType(cards[i], cards[j], cards[k])
+          const priority = RuleEvaluator.TYPE_PRIORITY[type.type]
+          if (priority > bestType.priority) {
+            bestType = type
+            bestThree = [cards[i], cards[j], cards[k]]
+          } else if (priority === bestType.priority && type.mainRank > bestType.mainRank) {
+            bestThree = [cards[i], cards[j], cards[k]]
+            bestType = type
+          }
+        }
+      }
+    }
+    return bestThree
+  }
+
+  /**
+   * 随机分组策略
+   * @param {Card[]} hand 玩家手牌
+   * @returns {Object} 分组结果
+   */
+  static randomStrategy(hand) {
+    const shuffled = [...hand].sort(() => Math.random() - 0.5)
+    return this._assignCards(shuffled)
+  }
+
+  /**
+   * 将12张牌分配到6个组
+   * @param {Card[]} cards 已排序的12张牌
+   * @returns {Object} 分组结果
+   */
+  static _assignCards(cards) {
+    const result = {
+      single: [cards[0], cards[6]],
+      twentyFourPoint: [cards[1], cards[2], cards[7], cards[8]],
+      threeCard: [cards[3], cards[4], cards[5], cards[9], cards[10], cards[11]]
+    }
+
+    return {
+      single: [result.single[0], result.single[1]],
+      twentyFourPoint: [result.twentyFourPoint[0], result.twentyFourPoint[1]],
+      threeCard: [result.threeCard[0], result.threeCard[1], result.threeCard[2]],
+      remainingCards: [result.single[1], result.twentyFourPoint[1], result.twentyFourPoint[2], result.threeCard[2], result.threeCard[3], result.threeCard[4]]
+    }
+  }
+
+  /**
+   * 执行AI分组决策
+   * @param {Card[]} hand 玩家手牌
+   * @param {string} strategy 策略类型: 'random' | 'smart' | 'enumerate'
+   * @returns {Object} 分组结果
+   */
+  static decide(hand, strategy = 'enumerate') {
+    if (strategy === 'random') {
+      return this.randomStrategy(hand)
+    }
+    
+    if (strategy === 'enumerate' || strategy === 'smart') {
+      if (hand.length === 6) {
+        return this.enumerateSixCards(hand)
+      }
+      return this.enumerateBestGroup(hand)
+    }
+    
+    return this.smartStrategy(hand)
+  }
+}
+
+export default AIPlayer
+
+--- src/utils/Card.js ---
+import { Suit, SUIT_PRIORITY, SUIT_NAMES, RANK_PRIORITY, RANK_NAMES } from './constants.js'
+
+/**
+ * 扑克牌类
+ * 表示一张扑克牌
+ */
+class Card {
+  /**
+   * @param {string} rank 点数 (2-10, J, Q, K, A)
+   * @param {string} suit 花色
+   */
+  constructor(rank, suit) {
+    this.rank = rank
+    this.suit = suit
+  }
+
+  /**
+   * 获取牌的点数优先级
+   * @returns {number}
+   */
+  get rankValue() {
+    return RANK_PRIORITY[this.rank] || 0
+  }
+
+  /**
+   * 获取牌的花色优先级
+   * @returns {number}
+   */
+  get suitValue() {
+    return SUIT_PRIORITY[this.suit] || 0
+  }
+
+  /**
+   * 获取牌的显示名称
+   * @returns {string}
+   */
+  get displayName() {
+    return RANK_NAMES[this.rank] + ' ' + SUIT_NAMES[this.suit]
+  }
+
+  /**
+   * 获取牌的颜色（红或黑）
+   * @returns {string}
+   */
+  get color() {
+    return (this.suit === Suit.HEARTS || this.suit === Suit.DIAMONDS) ? 'red' : 'black'
+  }
+
+  /**
+   * 比较两张牌的大小
+   * @param {Card} other 另一张牌
+   * @returns {number} 1:这张牌大, -1:另一张牌大, 0:相同
+   */
+  compareTo(other) {
+    if (this.rankValue !== other.rankValue) {
+      return this.rankValue > other.rankValue ? 1 : -1
+    }
+    if (this.suitValue !== other.suitValue) {
+      return this.suitValue > other.suitValue ? 1 : -1
+    }
+    return 0
+  }
+
+  /**
+   * 判断是否与另一张牌点数相同
+   * @param {Card} other 另一张牌
+   * @returns {boolean}
+   */
+  hasSameRank(other) {
+    return this.rank === other.rank
+  }
+
+  /**
+   * 判断是否与另一张牌花色相同
+   * @param {Card} other 另一张牌
+   * @returns {boolean}
+   */
+  hasSameSuit(other) {
+    return this.suit === other.suit
+  }
+
+  /**
+   * 创建牌的副本
+   * @returns {Card}
+   */
+  clone() {
+    return new Card(this.rank, this.suit)
+  }
+
+  /**
+   * 转换为可JSON序列化的对象
+   * @returns {Object}
+   */
+  toJSON() {
+    return {
+      rank: this.rank,
+      suit: this.suit,
+      color: this.color,
+      displayName: this.displayName,
+      rankValue: this.rankValue,
+      suitValue: this.suitValue
+    }
+  }
+
+  /**
+   * 从JSON对象创建Card实例
+   * @param {Object} json 
+   * @returns {Card}
+   */
+  static fromJSON(json) {
+    const card = new Card(json.rank, json.suit)
+    return card
+  }
+}
+
+export default Card
+
+--- src/utils/constants.js ---
+/**
+ * 扑克牌花色枚举
+ */
+const Suit = {
+  SPADES: 'spades',     // 黑桃
+  HEARTS: 'hearts',     // 红桃
+  CLUBS: 'clubs',       // 梅花
+  DIAMONDS: 'diamonds', // 方片
+  JOKER: 'joker'        // 大小王
+}
+
+/**
+ * 花色优先级（从大到小）
+ */
+const SUIT_PRIORITY = {
+  [Suit.SPADES]: 4,
+  [Suit.HEARTS]: 3,
+  [Suit.CLUBS]: 2,
+  [Suit.DIAMONDS]: 1,
+  [Suit.JOKER]: 0
+}
+
+/**
+ * 花色中文名称
+ */
+const SUIT_NAMES = {
+  [Suit.SPADES]: '♠',
+  [Suit.HEARTS]: '♥',
+  [Suit.CLUBS]: '♣',
+  [Suit.DIAMONDS]: '♦',
+  [Suit.JOKER]: 'Joker'
+}
+
+/**
+ * 点数优先级（从大到小）
+ */
+const RANK_PRIORITY = {
+  'A': 14,
+  'K': 13,
+  'Q': 12,
+  'J': 11,
+  '10': 10,
+  '9': 9,
+  '8': 8,
+  '7': 7,
+  '6': 6,
+  '5': 5,
+  '4': 4,
+  '3': 3,
+  '2': 2,
+  'JOKER': 15  // 大小王优先级最高
+}
+
+/**
+ * 点数中文名称
+ */
+const RANK_NAMES = {
+  'A': 'A',
+  'K': 'K',
+  'Q': 'Q',
+  'J': 'J',
+  '10': '10',
+  '9': '9',
+  '8': '8',
+  '7': '7',
+  '6': '6',
+  '5': '5',
+  '4': '4',
+  '3': '3',
+  '2': '2',
+  'JOKER': 'Joker'
+}
+
+export {
+  Suit,
+  SUIT_PRIORITY,
+  SUIT_NAMES,
+  RANK_PRIORITY,
+  RANK_NAMES
+}
+
+--- src/utils/Deck.js ---
+import Card from './Card.js'
+import { Suit } from './constants.js'
+
+/**
+ * 牌堆类
+ * 管理一副扑克牌（包含大小王）
+ */
+class Deck {
+  constructor() {
+    this.cards = []
+    this.discardedJokers = 0
+    this.reset()
+  }
+
+  /**
+   * 重置牌堆为标准54张牌（含大小王）
+   */
+  reset() {
+    this.cards = []
+    this.discardedJokers = 0
+    const ranks = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A']
+    const suits = [Suit.SPADES, Suit.HEARTS, Suit.CLUBS, Suit.DIAMONDS]
+    
+    for (const suit of suits) {
+      for (const rank of ranks) {
+        this.cards.push(new Card(rank, suit))
+      }
+    }
+    
+    this.cards.push(new Card('JOKER', Suit.JOKER))
+    this.cards.push(new Card('JOKER', Suit.JOKER))
+  }
+
+  /**
+   * 洗牌（Fisher-Yates算法）
+   */
+  shuffle() {
+    for (let i = this.cards.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [this.cards[i], this.cards[j]] = [this.cards[j], this.cards[i]]
+    }
+  }
+
+  /**
+   * 发一张牌（跳过大小王）
+   * @returns {Card|null} 如果牌堆为空则返回null
+   */
+  draw() {
+    while (this.cards.length > 0) {
+      const card = this.cards.pop()
+      if (card && card.rank === 'JOKER') {
+        this.discardedJokers++
+        continue
+      }
+      return card || null
+    }
+    return null
+  }
+
+  /**
+   * 发指定数量的牌（跳过大小王）
+   * @param {number} count 数量
+   * @returns {Card[]}
+   */
+  drawMultiple(count) {
+    const drawn = []
+    for (let i = 0; i < count; i++) {
+      const card = this.draw()
+      if (card) {
+        drawn.push(card)
+      }
+    }
+    return drawn
+  }
+
+  /**
+   * 获取牌堆剩余数量
+   * @returns {number}
+   */
+  get remaining() {
+    return this.cards.length
+  }
+
+  /**
+   * 判断牌堆是否为空
+   * @returns {boolean}
+   */
+  get isEmpty() {
+    return this.cards.length === 0
+  }
+
+  /**
+   * 清空牌堆
+   */
+  clear() {
+    this.cards = []
+  }
+
+  /**
+   * 创建牌的副本
+   * @returns {Card[]}
+   */
+  getAllCards() {
+    return this.cards.map(card => card.clone())
+  }
+}
+
+export default Deck
+
+--- src/utils/RuleEvaluator.js ---
+/**
+ * 游戏规则评估器
+ * 负责所有牌型比较和计分逻辑
+ */
+class RuleEvaluator {
+  /**
+   * 比较单张牌大小
+   * @param {import('./Card.js').default} card1 第一张牌
+   * @param {import('./Card.js').default} card2 第二张牌
+   * @returns {number} 1:card1大, -1:card2大, 0:平局
+   */
+  static compareSingleCard(card1, card2) {
+    if (card1.rankValue !== card2.rankValue) {
+      return card1.rankValue > card2.rankValue ? 1 : -1
+    }
+    if (card1.suitValue !== card2.suitValue) {
+      return card1.suitValue > card2.suitValue ? 1 : -1
+    }
+    return 0
+  }
+
+  /**
+   * 比较两组24点牌型大小
+   * @param {import('./Card.js').default} c1 第一组第一张牌
+   * @param {import('./Card.js').default} c2 第一组第二张牌
+   * @param {import('./Card.js').default} c3 第二组第一张牌
+   * @param {import('./Card.js').default} c4 第二组第二张牌
+   * @returns {number} 1:第一组大, -1:第二组大, 0:平局
+   */
+  static compare24Points(c1, c2, c3, c4) {
+    const getVal = card => (card.rank === 'A' ? 1 : card.rank === 'J' ? 11 : card.rank === 'Q' ? 12 : card.rank === 'K' ? 13 : parseInt(card.rank));
+    const sum1 = getVal(c1) + getVal(c2);
+    const sum2 = getVal(c3) + getVal(c4);
+    const valid1 = sum1 <= 24, valid2 = sum2 <= 24;
+
+    if (valid1 && !valid2) return 1;
+    if (!valid1 && valid2) return -1;
+    if (!valid1 && !valid2) return 0;
+
+    if (sum1 !== sum2) return sum1 > sum2 ? 1 : -1;
+
+    const max1 = [c1, c2].sort((a,b) => b.rankValue - a.rankValue || b.suitValue - a.suitValue)[0];
+    const max2 = [c3, c4].sort((a,b) => b.rankValue - a.rankValue || b.suitValue - a.suitValue)[0];
+    if (max1.rankValue !== max2.rankValue) return max1.rankValue > max2.rankValue ? 1 : -1;
+    if (max1.suitValue !== max2.suitValue) return max1.suitValue > max2.suitValue ? 1 : -1;
+
+    const min1 = sum1 - max1.rankValue, min2 = sum2 - max2.rankValue;
+    if (min1 !== min2) return min1 > min2 ? 1 : -1;
+    return 0;
+  }
+
+  /**
+   * 获取三张牌的牌型
+   * @param {import('./Card.js').default} card1 第一张牌
+   * @param {import('./Card.js').default} card2 第二张牌
+   * @param {import('./Card.js').default} card3 第三张牌
+   * @returns {Object} 牌型对象
+   */
+  static getThreeCardType(card1, card2, card3) {
+    const cards = [card1, card2, card3].sort((a, b) => b.rankValue - a.rankValue)
+    const ranks = cards.map(c => c.rank)
+    const suits = cards.map(c => c.suit)
+    const rankValues = cards.map(c => c.rankValue)
+    const suitValues = cards.map(c => c.suitValue)
+
+    const isSameSuit = suits[0] === suits[1] && suits[1] === suits[2]
+    const isSequential = this._isSequential(rankValues)
+    const hasThreeOfAKind = ranks[0] === ranks[1] && ranks[1] === ranks[2]
+    const hasPair = this._hasPair(ranks)
+
+    if (hasThreeOfAKind) {
+      return { type: 'triplet', rankValues, suitValues, mainRank: rankValues[0], cards }
+    }
+    if (isSameSuit && isSequential) {
+      return { type: 'straight_flush', rankValues, suitValues, mainRank: rankValues[0], cards }
+    }
+    if (isSameSuit) {
+      return { type: 'flush', rankValues, suitValues, mainRank: rankValues[0], cards }
+    }
+    if (isSequential) {
+      return { type: 'straight', rankValues, suitValues, mainRank: rankValues[0], cards }
+    }
+    if (hasPair) {
+      const pairInfo = this._getPairInfo(ranks, suitValues, cards)
+      return { type: 'pair', rankValues, suitValues, mainRank: pairInfo.pairRank, kicker: pairInfo.kicker, kickerSuit: pairInfo.kickerSuit, pairSuit1: pairInfo.pairSuit1, pairSuit2: pairInfo.pairSuit2, cards }
+    }
+    return { type: 'high_card', rankValues, suitValues, mainRank: rankValues[0], cards }
+  }
+
+  /**
+   * 判断点数是否连续
+   * @param {number[]} rankValues 
+   * @returns {boolean}
+   */
+  static _isSequential(rankValues) {
+    const sorted = [...rankValues].sort((a, b) => b - a)
+    if (sorted[0] === 14 && sorted[1] === 3 && sorted[2] === 2) {
+      return true
+    }
+    return sorted[0] - sorted[1] === 1 && sorted[1] - sorted[2] === 1
+  }
+
+  /**
+   * 判断是否有对子
+   * @param {string[]} ranks 
+   * @returns {boolean}
+   */
+  static _hasPair(ranks) {
+    return ranks[0] === ranks[1] || ranks[1] === ranks[2]
+  }
+
+  /**
+   * 获取对子信息
+   * @param {string[]} ranks 点数字符串数组
+   * @param {number[]} suitValues 花色值数组
+   * @param {import('./Card.js').default[]} cards 排序后的牌数组
+   * @returns {Object}
+   */
+  static _getPairInfo(ranks, suitValues, cards) {
+    let pairRank, kicker, kickerSuit, pairSuit1, pairSuit2
+    
+    if (ranks[0] === ranks[1] && ranks[1] === ranks[2]) {
+      pairRank = ranks[0].rankValue || parseInt(ranks[0])
+      kicker = 0
+      kickerSuit = 0
+      pairSuit1 = suitValues[0]
+      pairSuit2 = suitValues[1]
+    } else if (ranks[0] === ranks[1]) {
+      pairRank = ranks[0].rankValue || parseInt(ranks[0])
+      kicker = ranks[2].rankValue || parseInt(ranks[2])
+      kickerSuit = suitValues[2]
+      pairSuit1 = suitValues[0]
+      pairSuit2 = suitValues[1]
+    } else {
+      pairRank = ranks[1].rankValue || parseInt(ranks[1])
+      kicker = ranks[0].rankValue || parseInt(ranks[0])
+      kickerSuit = suitValues[0]
+      pairSuit1 = suitValues[1]
+      pairSuit2 = suitValues[2]
+    }
+    
+    return { pairRank, kicker, kickerSuit, pairSuit1, pairSuit2 }
+  }
+
+  /**
+   * 牌型优先级
+   */
+  static get TYPE_PRIORITY() {
+    return {
+      'triplet': 6,
+      'straight_flush': 5,
+      'flush': 4,
+      'straight': 3,
+      'pair': 2,
+      'high_card': 1
+    }
+  }
+
+  /**
+   * 比较两组三张牌牌型大小（按规格说明书完整实现）
+   * @param {import('./Card.js').default} card1a 第一组第一张牌
+   * @param {import('./Card.js').default} card1b 第一组第二张牌
+   * @param {import('./Card.js').default} card1c 第一组第三张牌
+   * @param {import('./Card.js').default} card2a 第二组第一张牌
+   * @param {import('./Card.js').default} card2b 第二组第二张牌
+   * @param {import('./Card.js').default} card2c 第二组第三张牌
+   * @returns {number} 1:第一组大, -1:第二组大, 0:平局
+   */
+  static compareThreeCards(card1a, card1b, card1c, card2a, card2b, card2c) {
+    const type1 = this.getThreeCardType(card1a, card1b, card1c);
+    const type2 = this.getThreeCardType(card2a, card2b, card2c);
+    const priority1 = this.TYPE_PRIORITY[type1.type];
+    const priority2 = this.TYPE_PRIORITY[type2.type];
+
+    if (priority1 !== priority2) return priority1 > priority2 ? 1 : -1;
+
+    switch (type1.type) {
+      case 'triplet':
+        if (type1.mainRank !== type2.mainRank) return type1.mainRank > type2.mainRank ? 1 : -1;
+        return Math.max(...type1.suitValues) - Math.max(...type2.suitValues);
+
+      case 'straight_flush':
+      case 'straight':
+      case 'flush':
+      case 'high_card': {
+        const sorted1 = type1.rankValues.sort((a,b)=>b-a);
+        const sorted2 = type2.rankValues.sort((a,b)=>b-a);
+        for (let i = 0; i < 3; i++) {
+          if (sorted1[i] !== sorted2[i]) return sorted1[i] > sorted2[i] ? 1 : -1;
+        }
+        return Math.max(...type1.suitValues) - Math.max(...type2.suitValues);
+      }
+
+      case 'pair': {
+        if (type1.mainRank !== type2.mainRank) return type1.mainRank > type2.mainRank ? 1 : -1;
+        if (type1.kicker !== type2.kicker) return type1.kicker > type2.kicker ? 1 : -1;
+        const maxPairSuit1 = Math.max(type1.pairSuit1, type1.pairSuit2);
+        const maxPairSuit2 = Math.max(type2.pairSuit1, type2.pairSuit2);
+        if (maxPairSuit1 !== maxPairSuit2) return maxPairSuit1 > maxPairSuit2 ? 1 : -1;
+        return type1.kickerSuit - type2.kickerSuit;
+      }
+    }
+    return 0;
+  }
+
+  /**
+   * 计算玩家在某组的排名
+   * @param {Object[]} playersGroups 玩家分组数据
+   * @param {string} groupType 组类型: 'single', '24point', 'threecard'
+   * @returns {Object[]} 排名结果
+   */
+  static calculateGroupRank(playersGroups, groupType) {
+    const results = playersGroups.map((pg, index) => ({
+      playerId: pg.playerId,
+      cards: pg.cards,
+      index: index
+    }))
+
+    results.sort((a, b) => {
+      let result = 0
+      if (groupType === 'single') {
+        result = this.compareSingleCard(a.cards[0], b.cards[0])
+      } else if (groupType === '24point') {
+        result = this.compare24Points(a.cards[0], a.cards[1], b.cards[0], b.cards[1])
+      } else if (groupType === 'threecard') {
+        result = this.compareThreeCards(a.cards[0], a.cards[1], a.cards[2], b.cards[0], b.cards[1], b.cards[2])
+      }
+      return -result
+    })
+
+    const ranked = []
+    for (let i = 0; i < results.length; i++) {
+      let rank = i
+      if (i > 0) {
+        const prev = results[i - 1]
+        const curr = results[i]
+        let isTie = false
+        if (groupType === 'single') {
+          isTie = this.compareSingleCard(prev.cards[0], curr.cards[0]) === 0
+        } else if (groupType === '24point') {
+          isTie = this.compare24Points(prev.cards[0], prev.cards[1], curr.cards[0], curr.cards[1]) === 0
+        } else if (groupType === 'threecard') {
+          isTie = this.compareThreeCards(prev.cards[0], prev.cards[1], prev.cards[2], curr.cards[0], curr.cards[1], curr.cards[2]) === 0
+        }
+        if (isTie) {
+          rank = ranked[i - 1].rank
+        }
+      }
+      ranked.push({ playerId: results[i].playerId, rank })
+    }
+
+    return ranked
+  }
+
+  /**
+   * 根据排名计算得分
+   * @param {number} rank 排名（0-based）
+   * @param {number} playerCount 玩家总数
+   * @param {boolean} isDoubleScore 是否翻倍
+   * @returns {number}
+   */
+  static calculateScore(rank, playerCount, isDoubleScore = false) {
+    const baseScore = playerCount - 1 - rank
+    return isDoubleScore ? baseScore * 2 : baseScore
+  }
+
+  /**
+   * 计算单张牌强度分数（用于AI评估）
+   * @param {import('./Card.js').default} card 
+   * @returns {number}
+   */
+  static scoreSingle(card) {
+    return card.rankValue * 10 + card.suitValue
+  }
+
+  /**
+   * 计算24点牌强度分数（用于AI评估）
+   * @param {import('./Card.js').default} c1 
+   * @param {import('./Card.js').default} c2 
+   * @returns {number}
+   */
+  static score24(c1, c2) {
+    const get24PointValue = (card) => {
+      if (card.rank === 'A') return 1
+      if (card.rank === 'J') return 11
+      if (card.rank === 'Q') return 12
+      if (card.rank === 'K') return 13
+      return parseInt(card.rank)
+    }
+    
+    const sum = get24PointValue(c1) + get24PointValue(c2)
+    if (sum > 24) return 0
+    
+    const val1 = get24PointValue(c1)
+    const val2 = get24PointValue(c2)
+    
+    let maxCard, minCard
+    if (val1 > val2) {
+      maxCard = c1
+      minCard = c2
+    } else if (val2 > val1) {
+      maxCard = c2
+      minCard = c1
+    } else {
+      maxCard = c1.suitValue >= c2.suitValue ? c1 : c2
+      minCard = c1.suitValue >= c2.suitValue ? c2 : c1
+    }
+    
+    const maxVal = get24PointValue(maxCard)
+    const minVal = get24PointValue(minCard)
+    const maxSuit = maxCard.suitValue
+    const minSuit = minCard.suitValue
+    
+    return sum * 10000 + maxVal * 1000 + maxSuit * 100 + minVal * 10 + minSuit
+  }
+
+  /**
+   * 计算炸金花牌强度分数（用于AI评估）
+   * @param {import('./Card.js').default} c1 
+   * @param {import('./Card.js').default} c2 
+   * @param {import('./Card.js').default} c3 
+   * @returns {number}
+   */
+  static scorePoker(c1, c2, c3) {
+    const type = this.getThreeCardType(c1, c2, c3)
+    const priority = this.TYPE_PRIORITY[type.type]
+    
+    const sorted = [...type.rankValues].sort((a, b) => b - a)
+    const maxSuit = Math.max(...type.suitValues)
+    
+    if (type.type === 'triplet') {
+      return priority * 1000000 + type.mainRank * 1000 + maxSuit
+    }
+    
+    if (type.type === 'straight_flush' || type.type === 'straight') {
+      return priority * 1000000 + sorted[0] * 10000 + sorted[1] * 100 + sorted[2] + maxSuit
+    }
+    
+    if (type.type === 'flush' || type.type === 'high_card') {
+      return priority * 1000000 + sorted[0] * 10000 + sorted[1] * 100 + sorted[2] + maxSuit
+    }
+    
+    if (type.type === 'pair') {
+      const pairRank = type.mainRank
+      const kicker = type.kicker
+      const maxPairSuit = Math.max(type.pairSuit1, type.pairSuit2)
+      return priority * 1000000 + pairRank * 10000 + kicker * 100 + maxPairSuit * 10 + type.kickerSuit
+    }
+    
+    return priority * 1000000
+  }
+}
+
+export default RuleEvaluator
+
+--- vite.config.js ---
+import { defineConfig } from 'vite'
+import vue from '@vitejs/plugin-vue'
+
+export default defineConfig({
+  plugins: [vue()],
+  server: {
+    port: 3000
+  }
+})
+
+--- 游戏需求规格说明书.txt ---
+游戏需求规格说明书（更新版）
+1. 引言
+1.1 编写目的
+本文档旨在明确描述一款融合了“比大小”、“24点”和“炸金花”三种玩法的复合扑克牌游戏的需求。游戏为单机人机对战模式，支持1名人类玩家与1~3名电脑玩家同台竞技。文档详细规定了游戏规则、交互方式、计分逻辑、系统行为及AI设计，为开发、测试和验收提供依据。
+
+1.2 适用范围
+本文档适用于游戏开发团队、测试人员及项目管理人员。
+
+1.3 定义与缩略语
+术语	解释
+一局游戏	由多轮比赛组成，所有轮次结束后根据总分决出胜者。
+一轮游戏	每轮中每位玩家获得12张牌，并分为上下两个回合进行出牌和计分。
+回合	每回合玩家从手中6张牌中分成三堆（1张、2张、3张），分别参与三种比试。
+比大小堆	第一堆，每人出一张牌，按点数大小比较，点数相同则比花色。
+24点堆	第二堆，每人出两张牌，计算点数之和，比较与24的关系及最大牌。
+炸金花堆	第三堆，每人出三张牌，按炸金花牌型规则比较。
+豹子	三张点数相同的牌。
+顺金	同花顺，即花色相同且点数连续。
+金花	同花，即花色相同但点数不连续。
+顺子	点数连续但花色不全相同。
+对子	两张点数相同，另一张不同。
+单张	三张牌无特殊组合。
+底分	每堆比赛的名次对应得分，第一名得（玩家人数-1）分，第二名得（玩家人数-2）分，依此类推，最后一名得0分。炸金花堆得分翻倍。
+AI	人工智能，电脑玩家。
+2. 总体描述
+2.1 产品视角
+本产品是一款创新型扑克牌游戏，将三种经典玩法融合于同一轮次中，考验玩家的策略分配能力。玩家需将手中12张牌合理分配到两个回合的三个堆中，争取在每个小项中获得高分。游戏提供直观的图形界面，支持鼠标拖拽出牌，电脑玩家采用基于枚举优化的智能策略进行自动分配。
+
+2.2 用户特征
+主要用户：喜欢棋牌类游戏的玩家，对策略组合感兴趣。
+
+次要用户：希望通过人机对战熟悉炸金花、24点等规则的初学者。
+
+用户需具备基本的扑克牌认知，无需专业数学知识。
+
+2.3 假设与依赖
+游戏使用一副标准54张扑克牌（含大小王），但大小王在发牌时被剔除，实际有效牌为52张（无大小王）。
+
+图形界面需支持拖拽操作，若采用控制台版本则需提供数字选择方式。
+
+
+
+3. 具体需求
+3.1 游戏初始化
+功能编号	FR-001
+名称	开始新游戏
+描述	玩家启动游戏后，可设置电脑玩家数量（1~3）和一轮游戏包含的轮次数（3~7）。
+输入	通过界面滑动条或下拉框选择电脑人数和轮数。
+处理	系统创建指定数量的AI玩家和一个人类玩家，每位玩家初始总分为0。
+输出	进入牌桌界面，显示所有玩家信息（玩家1、电脑2等）及当前轮次/回合提示。
+3.2 发牌规则
+功能编号	FR-002
+名称	每轮发牌
+描述	每轮开始时，系统从洗好的牌堆中为每位玩家发放12张有效牌。
+处理	1. 使用一副54张牌（含大小王），洗牌。
+2. 依次为每位玩家发牌，每次发一张。若发到大小王，则将该牌丢弃（不发给任何玩家），并继续从牌堆中发下一张，直至每位玩家拥有12张非大小王的牌。
+3. 发牌过程中丢弃的大小王不再使用，且不计入任何玩家手中。
+4. 发完12张后，剩余牌弃用（不进入后续轮次）。
+输出	每位玩家获得12张手牌，在界面中以背面或正面显示（玩家可见自己的牌，AI的牌对玩家保密）。
+3.3 回合流程
+每轮包含两个回合：上半回合和下半回合。每个回合玩家需从当前手牌中选出6张牌，并分成三堆（分别用于比大小、24点、炸金花），然后同时亮牌比较计分。
+
+3.3.1 上半回合出牌
+功能编号	FR-003
+名称	上半回合出牌
+描述	玩家从12张手牌中选出6张，并分配至三个堆，剩余6张留待下半回合使用。
+操作方式	人类玩家通过鼠标拖拽牌张到指定区域（第一堆区域、第二堆区域、第三堆区域），每堆需放满指定张数（1、2、3）后才可确认。AI玩家由系统自动分配。
+约束	每堆牌必须恰好为指定张数，且每张牌只能使用一次。玩家可随时调整分配，确认后进入等待状态。
+确认机制	所有玩家完成分配后，系统自动进入亮牌比较阶段。若某玩家未确认，系统可设置超时机制（如30秒未操作则随机分配）。
+3.3.2 亮牌与比较
+功能编号	FR-004
+名称	三堆同时比较
+描述	所有玩家确认出牌后，系统同时显示每堆的牌，并按规则计算每堆的名次和得分。
+处理	1. 先分别计算每堆的排名（第一名、第二名……最后一名）。
+2. 根据排名计算每堆得分：第一名得（玩家数-1）分，第二名得（玩家数-2）分，……最后一名得0分。炸金花堆得分乘以2。
+3. 将三堆得分累加，计入每位玩家的本回合得分，并累加到总分。
+输出	界面展示各玩家每堆的牌、每堆排名及得分，并更新总分。
+3.3.3 下半回合出牌
+功能编号	FR-005
+名称	下半回合出牌
+描述	使用上半回合剩余的6张牌，重复出牌、比较、计分过程。
+处理	同上半回合，玩家需将剩余6张牌重新分配至三堆。
+3.3.4 轮次结束
+功能编号	FR-006
+名称	轮次结算
+描述	两个回合结束后，本轮完成。显示本轮各玩家总分，并准备进入下一轮。
+处理	若已完成预设轮次数，则跳转到游戏结束结算；否则重新洗牌，开始新一轮发牌。
+3.4 各堆详细比较规则
+3.4.1 比大小堆（1张牌）
+点数顺序：A > K > Q > J > 10 > 9 > 8 > 7 > 6 > 5 > 4 > 3 > 2（A最大，2最小）。
+
+花色顺序：黑桃 > 红心 > 梅花 > 方块。
+
+比较方法：先比点数，点数大者胜；若点数相同，则比花色，花色大者胜。
+
+排名：按上述规则从大到小排序，确定唯一第一名、第二名等（由于点数花色组合唯一，不会出现平局）。
+
+3.4.2 24点堆（2张牌）
+牌面点数：A=1，K=13，Q=12，J=11，10=10，…，2=2。大小王不出现。
+
+计算规则：计算两张牌的点数之和（记为S）。
+
+比较步骤：
+
+若S > 24，则该玩家得分为0，且排名在所有S≤24的玩家之后。
+若S ≤ 24，则比较S的大小，S越大者排名越靠前。
+若S相同，则比较这两张牌中最大的那张牌的点数，点数大者排名靠前。
+若最大牌点数也相同，则比较该最大牌的花色（花色大者胜）。
+注意：由于每张牌点数花色唯一，上述比较可保证排名唯一。
+
+3.4.3 炸金花堆（3张牌）
+牌型大小顺序（从大到小）：
+豹子 > 顺金 > 金花 > 顺子 > 对子 > 单张
+
+牌型定义：
+
+豹子：三张点数相同。
+
+顺金：花色相同且点数连续（A可作为最大或最小，但必须连续，如A、2、3或Q、K、A）。
+
+金花：花色相同但点数不连续。
+
+顺子：点数连续但花色不全相同。
+
+对子：两张点数相同，另一张不同。
+
+单张：三张牌无上述组合。
+
+同牌型比较规则：
+
+豹子：比较点数，点数大者胜。
+
+顺金/顺子：比较最大牌的点数，若相同则比较次大牌的点数，若还相同则比较最小牌的点数。若所有点数相同，则比较最大牌的花色。
+
+金花/单张：按点数从大到小排序，先比较最大牌点数，若相同则比较次大牌，再相同则比较最小牌。若所有点数相同，则比较最大牌的花色。
+
+对子：先比较对子的点数，大者胜；若相同则比较单张的点数；若单张也相同，则比较对子中最大花色（即对子中花色较大的那张），若还相同则比较单张的花色。
+
+排名：上述规则保证唯一排名，不会出现平局。
+
+3.5 计分规则
+每堆比赛，根据排名获得分数：
+第1名：得（玩家总数 - 1）分
+第2名：得（玩家总数 - 2）分
+...
+最后一名：得0分
+例如，4人游戏，第一名得3分，第二名得2分，第三名得1分，第四名得0分。
+
+炸金花堆的得分在上述基础上乘以2。即第一名得2*(n-1)分，第二名得2*(n-2)分，以此类推。
+
+每回合结束后，将三堆得分相加，得到该回合得分，并累加到玩家总分。
+
+一轮结束后，显示本轮各玩家总分，然后进入下一轮。
+
+3.6 游戏结束与胜负判定
+完成预设轮次数（3~7轮）后，游戏结束。
+
+比较所有玩家的累计总分，总分最高者获胜。若出现同分，则并列第一（显示并列冠军）。
+
+3.7 AI设计
+3.7.1 设计目标
+AI玩家需具备一定的出牌智能，能够根据当前手牌合理分配至三个堆，以争取本回合最高得分。AI不依赖对其他玩家手牌的预测，仅基于自身手牌的绝对强度进行优化。
+
+3.7.2 牌力评估函数
+为量化每堆牌的强度，定义以下评估函数（分数越高表示该堆在比较中越强）：
+
+比大小堆强度 score_single(card)：
+score = 点数 * 10 + 花色值，其中花色值：黑桃=4，红心=3，梅花=2，方块=1；点数：A=14，K=13，Q=12，J=11，10=10，...，2=2。
+
+24点堆强度 score_24(card1, card2)：
+计算点数和S。若S > 24，则强度 = 0；否则强度 = S * 100 + 最大牌点数 * 10 + 最大牌花色值（最大牌点数若相同，取花色值大的那张）。
+
+炸金花堆强度 score_poker(card1, card2, card3)：
+根据游戏比较规则，构造一个整数分数，使得分数大小与牌型强弱完全一致。构造方法如下：
+
+确定牌型等级：豹子=6，顺金=5，金花=4，顺子=3，对子=2，单张=1。
+对三张牌按比较规则提取关键特征，生成分数：
+豹子：等级*1000000 + 点数*1000 + 最大花色
+顺金/顺子：将三张牌按点数从大到小排序（注意顺子中A可能为1，但排序时按实际比较值，例如A23顺子排序后为3,2,1），分数 = 等级*1000000 + 最大牌点数*10000 + 次大牌点数*100 + 最小牌点数*1 + 最大牌花色
+金花/单张：排序后，分数 = 等级*1000000 + 点数1*10000 + 点数2*100 + 点数3*1 + 最大牌花色
+对子：设对子点数为P，单张点数为S，排序时P可能大于或小于S，但分数构造为：等级*1000000 + P*10000 + S*100 + 对子中较大花色*10 + 单张花色（保证比较顺序）
+该函数确保任何两手牌，若甲大于乙，则score_poker(甲) > score_poker(乙)。
+3.7.3 回合内最优分配算法
+在每一回合开始时，AI手中有固定张数的牌（上半回合12张，下半回合6张）。AI通过枚举所有可能的分配方案，选择使目标函数最大化的方案。
+
+目标函数：
+total = score_single(比大小牌) + score_24(24点牌1, 24点牌2) + 2 * score_poker(炸金花牌1, 炸金花牌2, 炸金花牌3)
+
+枚举步骤：
+
+从当前手牌中选出6张牌的所有组合（上半回合C(12,6)，下半回合仅1种）。
+对每个6张牌组合，枚举所有分配方式：
+从6张中选1张给比大小堆：C(6,1)
+从剩余5张中选2张给24点堆：C(5,2)
+剩余3张给炸金花堆
+共 6 * 10 = 60 种分配。
+计算每种分配的total值，记录最大值对应的分配方案。
+若多个方案并列最大，随机选择其一。
+输出：该回合的6张牌及其归属（三堆的具体牌张）。
+
+3.7.4 上下半回合的协同
+上半回合：AI从12张牌中按上述算法选出最优的6张及分配，剩余6张自动进入下半回合。
+
+下半回合：AI将剩余6张牌作为手牌，再次调用上述算法（此时6张牌的组合唯一，只需枚举60种分配），选出最优分配。
+
+3.7.5 性能要求
+AI决策时间 ≤ 1秒，确保游戏流畅。
+
+枚举算法在Python中实现应满足性能要求，必要时可预先计算牌力值或采用缓存优化。
+
+3.8 用户界面
+主界面：开始游戏设置（电脑人数、轮数）、帮助、退出。
+
+牌桌界面：
+
+显示所有玩家的头像、名称、当前总分。
+
+中央显示当前回合及倒计时（可选）。
+
+人类玩家手牌区域，牌面朝上，可拖拽。
+
+三个目标区域（比大小堆、24点堆、炸金花堆），每个区域有对应图标和数字（1、2、3）提示张数。
+
+确认按钮：玩家完成分配后点击确认。
+
+电脑玩家的牌背面朝上，但出牌后亮牌时显示正面。
+
+亮牌阶段，展示所有玩家各堆的牌，并显示排名和得分。
+
+下一回合/下一轮按钮（自动跳转）。
+
+操作方式：鼠标拖拽牌张到目标区域，也可双击自动放置。支持撤销。
+
+3.9 异常处理
+玩家超时未确认：系统自动为玩家随机分配剩余牌，并提示。
+
+发牌时若因大小王丢弃导致有效牌不足，重新洗牌并提示（概率极低）。
+
+4. 非功能需求
+4.1 性能
+游戏启动时间 ≤ 3秒。
+
+每回合操作响应时间 ≤ 0.5秒。
+
+AI决策时间 ≤ 1秒（单AI）。
+
+4.2 可用性
+界面简洁，操作直观，新手可在10分钟内掌握。
+
+提供规则说明帮助文档。
+
+支持键盘快捷键（如回车确认、ESC退出等）。
