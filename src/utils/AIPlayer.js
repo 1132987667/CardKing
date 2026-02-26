@@ -152,46 +152,88 @@ class AIPlayer {
   }
 
   /**
-   * 智能分组策略（备用）
-   * @param {Card[]} hand 玩家手牌
+   * 智能分组策略（高性能）
+   * @param {Card[]} hand 玩家手牌（12张或6张）
    * @returns {Object} 分组结果
    */
   static smartStrategy(hand) {
+    // 如果是6张牌，直接分组
+    if (hand.length === 6) {
+      return this._smartGroupSixCards(hand)
+    }
+    
+    // 如果是12张牌，先选出最优的6张，再分组
     const sorted = [...hand].sort((a, b) => b.rankValue - a.rankValue)
     
-    const singleCards = []
-    const twoCards = []
-    const threeCards = []
-    const remaining = [...sorted]
-
-    const bestSingle = this._findBestSingleCard(remaining)
-    singleCards.push(bestSingle)
-    remaining.splice(remaining.indexOf(bestSingle), 1)
-
-    const bestTwoCard = this._findBestTwoCards(remaining)
-    twoCards.push(...bestTwoCard)
-    bestTwoCard.forEach(c => remaining.splice(remaining.indexOf(c), 1))
-
-    const bestThreeCard = this._findBestThreeCards(remaining)
-    threeCards.push(...bestThreeCard)
-    bestThreeCard.forEach(c => remaining.splice(remaining.indexOf(c), 1))
-
-    const secondSingle = this._findBestSingleCard(remaining)
-    singleCards.push(secondSingle)
-    remaining.splice(remaining.indexOf(secondSingle), 1)
-
-    const secondTwoCard = this._findBestTwoCards(remaining)
-    twoCards.push(...secondTwoCard)
-    bestTwoCard.forEach(c => remaining.splice(remaining.indexOf(c), 1))
-
-    const secondThreeCard = this._findBestThreeCards(remaining)
-    threeCards.push(...secondThreeCard)
-
+    // 启发式选择：优先选择高点数牌和可能形成好牌型的牌
+    const selected = this._selectBestSixCards(hand)
+    
+    return this._smartGroupSixCards(selected)
+  }
+  
+  /**
+   * 从12张牌中选择最优的6张
+   * @param {Card[]} hand 12张手牌
+   * @returns {Card[]} 选出的6张牌
+   */
+  static _selectBestSixCards(hand) {
+    const sorted = [...hand].sort((a, b) => b.rankValue - a.rankValue)
+    
+    // 启发式策略：优先保留高点数牌
+    // 同时考虑24点组合和比三张的牌型潜力
+    const candidates = [...sorted]
+    const selected = []
+    
+    // 1. 选一张最大的作为单张候选
+    selected.push(candidates.shift())
+    
+    // 2. 找最佳24点组合（两张牌点数之和最大）
+    const bestTwo = this._findBestTwoCards(candidates)
+    selected.push(...bestTwo)
+    bestTwo.forEach(c => {
+      const idx = candidates.findIndex(card => card.rank === c.rank && card.suit === c.suit)
+      if (idx > -1) candidates.splice(idx, 1)
+    })
+    
+    // 3. 找最佳三张牌（比三张）
+    const bestThree = this._findBestThreeCards(candidates)
+    selected.push(...bestThree)
+    
+    // 如果选不够6张，从剩余牌中补充
+    while (selected.length < 6 && candidates.length > 0) {
+      selected.push(candidates.shift())
+    }
+    
+    return selected
+  }
+  
+  /**
+   * 智能分组6张牌
+   * @param {Card[]} sixCards 6张牌
+   * @returns {Object} 分组结果
+   */
+  static _smartGroupSixCards(sixCards) {
+    const cards = [...sixCards]
+    
+    // 1. 单张：选最大点数的
+    const bestSingle = this._findBestSingleCard(cards)
+    cards.splice(cards.indexOf(bestSingle), 1)
+    
+    // 2. 24点：从剩余牌中选点数之和最大的两张
+    const bestTwo = this._findBestTwoCards(cards)
+    bestTwo.forEach(c => {
+      const idx = cards.findIndex(card => card.rank === c.rank && card.suit === c.suit)
+      if (idx > -1) cards.splice(idx, 1)
+    })
+    
+    // 3. 比三张：剩下的3张
+    const bestThree = [...cards]
+    
     return {
-      single: [singleCards[0], singleCards[1]],
-      twentyFourPoint: [twoCards[0], twoCards[1], twoCards[2], twoCards[3]],
-      threeCard: [threeCards[0], threeCards[1], threeCards[2], threeCards[3], threeCards[4], threeCards[5]],
-      remainingCards: remaining
+      single: [bestSingle],
+      twentyFourPoint: bestTwo,
+      threeCard: bestThree,
+      remainingCards: []
     }
   }
 
@@ -298,13 +340,14 @@ class AIPlayer {
       return this.randomStrategy(hand)
     }
     
-    if (strategy === 'enumerate' || strategy === 'smart') {
+    if (strategy === 'enumerate') {
       if (hand.length === 6) {
         return this.enumerateSixCards(hand)
       }
       return this.enumerateBestGroup(hand)
     }
     
+    // smart strategy - 使用启发式算法，性能更好
     return this.smartStrategy(hand)
   }
 }

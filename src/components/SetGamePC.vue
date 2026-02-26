@@ -24,6 +24,10 @@
       </div>
       
       <div class="header-right">
+        <button class="home-btn" @click="backToMenu">
+          <span class="home-icon">⌂</span>
+          <span class="home-text">首页</span>
+        </button>
         <div class="timer">
           {{ formatTime(setStore.timeElapsed) }}
         </div>
@@ -162,7 +166,8 @@ import { drawCard } from '../utils/setCardRenderer.js'
 
 export default {
   name: 'SetGamePC',
-  setup() {
+  emits: ['back-to-menu'],
+  setup(props, { emit }) {
     const showRules = ref(false)
     const showGiveUpConfirm = ref(false)
     const canvasRef = ref(null)
@@ -251,16 +256,26 @@ export default {
 
     const handleResize = () => {
       if (!boardRef.value || !canvasRef.value) return
-      
+
       const board = boardRef.value
       const canvas = canvasRef.value
-      
-      canvas.width = board.clientWidth
-      canvas.height = board.clientHeight
-      
+      const dpr = window.devicePixelRatio || 1
+
+      // 设置显示大小
+      canvas.style.width = board.clientWidth + 'px'
+      canvas.style.height = board.clientHeight + 'px'
+
+      // 设置实际像素大小（考虑DPR）
+      canvas.width = board.clientWidth * dpr
+      canvas.height = board.clientHeight * dpr
+
+      // 缩放上下文以匹配DPR
+      ctx.scale(dpr, dpr)
+
       render()
     }
 
+    watch(() => setStore.boardCards.length, render)
     watch(() => setStore.boardCards, render, { deep: true })
     watch(() => setStore.selectedCards, render, { deep: true })
     watch(() => setStore.showHint, render)
@@ -295,6 +310,11 @@ export default {
       showGiveUpConfirm.value = false
     }
 
+    const backToMenu = () => {
+      setStore.endGame()
+      emit('back-to-menu')
+    }
+
     return {
       showRules,
       showGiveUpConfirm,
@@ -304,7 +324,8 @@ export default {
       handleCanvasClick,
       formatTime,
       handleGiveUp,
-      confirmGiveUp
+      confirmGiveUp,
+      backToMenu
     }
   }
 }
@@ -313,26 +334,25 @@ export default {
 <style scoped>
 .game {
   min-height: 100vh;
-  background-color: #f4f1ea;
-  color: #2c2c2c;
-  font-family: "Noto Serif SC", "Songti SC", "SimSun", serif;
+  background: #1a1a1a;
+  color: rgba(245, 240, 230, 0.95);
+  font-family: 'JetBrains Mono', 'Consolas', monospace;
   display: flex;
   flex-direction: column;
   position: relative;
 }
 
 .game::before {
-  content: "";
+  content: '';
   position: fixed;
   top: 0;
   left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  z-index: 9999;
+  right: 0;
+  bottom: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
   opacity: 0.12;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
-  mix-blend-mode: multiply;
+  pointer-events: none;
+  z-index: 1;
 }
 
 .header {
@@ -340,10 +360,11 @@ export default {
   justify-content: space-between;
   align-items: center;
   padding: 16px 32px;
-  background: rgba(255, 255, 255, 0.6);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(45, 42, 40, 0.92);
+  border-bottom: 1px solid rgba(180, 170, 160, 0.15);
   position: relative;
   z-index: 10;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
 }
 
 .header-left {
@@ -360,13 +381,14 @@ export default {
 
 .logo-icon {
   font-size: 1.5rem;
-  color: #8e44ad;
+  color: #c4a77d;
 }
 
 .logo-text {
   font-size: 1.25rem;
   font-weight: 700;
   letter-spacing: 0.1em;
+  color: rgba(245, 240, 230, 0.95);
 }
 
 .rules-btn {
@@ -374,19 +396,20 @@ export default {
   align-items: center;
   gap: 6px;
   padding: 8px 16px;
-  background: transparent;
-  border: 1px solid rgba(0, 0, 0, 0.15);
-  border-radius: 4px;
+  background: rgba(196, 167, 125, 0.1);
+  border: 1px solid rgba(196, 167, 125, 0.3);
+  border-radius: 6px;
   cursor: pointer;
   font-family: inherit;
   font-size: 0.875rem;
-  color: #5a5a5a;
+  color: #c4a77d;
   transition: all 0.2s ease;
 }
 
 .rules-btn:hover {
-  background: rgba(0, 0, 0, 0.05);
-  border-color: rgba(0, 0, 0, 0.25);
+  background: rgba(196, 167, 125, 0.18);
+  border-color: rgba(196, 167, 125, 0.5);
+  box-shadow: 0 2px 8px rgba(196, 167, 125, 0.15);
 }
 
 .rules-icon {
@@ -404,7 +427,7 @@ export default {
 
 .stat-label {
   font-size: 0.75rem;
-  color: #8a7f70;
+  color: rgba(200, 190, 180, 0.7);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -412,11 +435,11 @@ export default {
 .stat-value {
   font-size: 1.5rem;
   font-weight: 700;
-  color: #8e44ad;
+  color: #c4a77d;
 }
 
 .stat-divider {
-  color: #ccc;
+  color: rgba(180, 170, 160, 0.4);
   margin: 0 4px;
 }
 
@@ -429,7 +452,7 @@ export default {
   font-family: "Helvetica Neue", Arial, sans-serif;
   font-size: 1.5rem;
   font-weight: 700;
-  color: #5a5a5a;
+  color: #c4a77d;
   letter-spacing: 0.05em;
 }
 
@@ -448,7 +471,7 @@ export default {
     padding: 12px;
     gap: 12px;
   }
-  
+
   .sidebar {
     width: 100%;
     flex-direction: row;
@@ -458,16 +481,16 @@ export default {
 
 .sidebar {
   width: 240px;
-  background: rgba(255, 255, 255, 0.5);
+  background: rgba(50, 47, 44, 0.85);
   border-radius: 8px;
   padding: 20px;
-  border: 1px solid rgba(0, 0, 0, 0.06);
+  border: 1px solid rgba(180, 170, 160, 0.15);
 }
 
 .sidebar-title {
   font-size: 0.875rem;
   font-weight: 700;
-  color: #5a5a5a;
+  color: rgba(220, 210, 200, 0.85);
   margin-bottom: 16px;
   display: flex;
   align-items: center;
@@ -477,7 +500,7 @@ export default {
 .title-line {
   width: 16px;
   height: 2px;
-  background: #8e44ad;
+  background: #c4a77d;
 }
 
 .info-list {
@@ -496,13 +519,13 @@ export default {
 
 .info-label {
   font-size: 0.875rem;
-  color: #7a7a7a;
+  color: rgba(180, 170, 160, 0.65);
 }
 
 .info-value {
   font-size: 0.875rem;
   font-weight: 600;
-  color: #4a4a4a;
+  color: rgba(220, 210, 200, 0.85);
 }
 
 .found-sets {
@@ -518,15 +541,15 @@ export default {
   align-items: center;
   gap: 8px;
   padding: 8px;
-  background: rgba(255, 255, 255, 0.6);
+  background: rgba(60, 57, 54, 0.5);
   border-radius: 6px;
-  border: 1px solid rgba(0, 0, 0, 0.06);
+  border: 1px solid rgba(180, 170, 160, 0.08);
 }
 
 .found-set-label {
   font-size: 0.75rem;
   font-weight: 600;
-  color: #8a7f70;
+  color: rgba(180, 170, 160, 0.6);
   width: 20px;
 }
 
@@ -554,7 +577,7 @@ export default {
 
 .no-sets {
   font-size: 0.875rem;
-  color: #aaa;
+  color: rgba(180, 170, 160, 0.5);
   text-align: center;
   padding: 20px;
 }
@@ -566,13 +589,13 @@ export default {
 .sidebar-section h3 {
   font-size: 0.875rem;
   font-weight: 700;
-  color: #5a5a5a;
+  color: rgba(220, 210, 200, 0.85);
   margin: 0 0 12px 0;
 }
 
 .sidebar-section p {
   font-size: 0.85rem;
-  color: #666;
+  color: rgba(180, 170, 160, 0.7);
   line-height: 1.5;
   margin: 0 0 12px 0;
 }
@@ -581,7 +604,7 @@ export default {
   margin: 0;
   padding-left: 20px;
   font-size: 0.85rem;
-  color: #666;
+  color: rgba(180, 170, 160, 0.7);
 }
 
 .rules-list li {
@@ -600,20 +623,20 @@ export default {
   justify-content: space-between;
   align-items: center;
   padding: 8px;
-  background: rgba(255, 255, 255, 0.6);
+  background: rgba(60, 57, 54, 0.5);
   border-radius: 6px;
-  border: 1px solid rgba(0, 0, 0, 0.06);
+  border: 1px solid rgba(180, 170, 160, 0.08);
 }
 
 .deck-label {
   font-size: 0.85rem;
-  color: #666;
+  color: rgba(180, 170, 160, 0.65);
 }
 
 .deck-value {
   font-size: 0.85rem;
   font-weight: 600;
-  color: #4a4a4a;
+  color: rgba(220, 210, 200, 0.85);
 }
 
 .workbench {
@@ -778,34 +801,36 @@ export default {
 
 .btn {
   padding: 12px 24px;
-  background: rgba(255, 255, 255, 0.8);
-  border: 1px solid rgba(0, 0, 0, 0.15);
-  border-radius: 6px;
-  font-family: inherit;
   font-size: 0.875rem;
+  font-family: inherit;
+  letter-spacing: 1px;
+  background: transparent;
+  border: 1px solid rgba(180, 170, 160, 0.35);
+  color: rgba(220, 210, 200, 0.85);
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
 .btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 1);
-  border-color: rgba(0, 0, 0, 0.25);
+  border-color: rgba(196, 167, 125, 0.6);
+  color: rgba(245, 240, 230, 0.95);
 }
 
 .btn:disabled {
-  opacity: 0.5;
+  opacity: 0.3;
   cursor: not-allowed;
 }
 
 .btn-highlight {
-  background: #8e44ad;
-  color: white;
-  border-color: #8e44ad;
+  background: #c4a77d;
+  border-color: #c4a77d;
+  color: #2d2a28;
 }
 
 .btn-highlight:hover:not(:disabled) {
-  background: #5a4a69;
-  border-color: #5a4a69;
+  background: #d4b78d;
+  border-color: #d4b78d;
+  box-shadow: 0 4px 12px rgba(196, 167, 125, 0.3);
 }
 
 .rules-modal {
@@ -814,7 +839,7 @@ export default {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.4);
+  background: rgba(0, 0, 0, 0.6);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -822,7 +847,7 @@ export default {
 }
 
 .rules-content {
-  background: #f4f1ea;
+  background: #2d2a28;
   border-radius: 12px;
   width: 90%;
   max-width: 600px;
@@ -830,7 +855,8 @@ export default {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(180, 170, 160, 0.15);
 }
 
 .rules-content-small {
@@ -842,14 +868,15 @@ export default {
   justify-content: space-between;
   align-items: center;
   padding: 20px 24px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  border-bottom: 1px solid rgba(180, 170, 160, 0.15);
+  background: rgba(45, 42, 40, 0.95);
 }
 
 .rules-header h2 {
   margin: 0;
   font-size: 1.25rem;
   font-weight: 700;
-  color: #4a4a4a;
+  color: #c4a77d;
 }
 
 .rules-close {
@@ -857,14 +884,19 @@ export default {
   border: none;
   font-size: 1.5rem;
   cursor: pointer;
-  color: #8a7f70;
+  color: rgba(180, 170, 160, 0.6);
   padding: 0;
   line-height: 1;
+}
+
+.rules-close:hover {
+  color: #c4a77d;
 }
 
 .rules-body {
   padding: 24px;
   overflow-y: auto;
+  background: rgba(45, 42, 40, 0.95);
 }
 
 .rules-section {
@@ -878,13 +910,13 @@ export default {
 .rules-section h3 {
   font-size: 1rem;
   font-weight: 700;
-  color: #5a5a5a;
+  color: rgba(220, 210, 200, 0.9);
   margin: 0 0 12px 0;
 }
 
 .rules-section p {
   font-size: 0.875rem;
-  color: #6a6a6a;
+  color: rgba(180, 170, 160, 0.75);
   margin: 0 0 12px 0;
   line-height: 1.7;
 }
@@ -896,17 +928,17 @@ export default {
 
 .rules-section li {
   font-size: 0.875rem;
-  color: #6a6a6a;
+  color: rgba(180, 170, 160, 0.75);
   margin-bottom: 6px;
   line-height: 1.6;
 }
 
 .rules-example {
   padding: 12px;
-  background: rgba(107, 91, 122, 0.1);
+  background: rgba(196, 167, 125, 0.1);
   border-radius: 6px;
   font-size: 0.875rem;
-  color: #5a4a69;
+  color: #c4a77d;
 }
 
 .settings-footer {
@@ -914,13 +946,14 @@ export default {
   justify-content: flex-end;
   gap: 12px;
   padding: 16px 24px;
-  border-top: 1px solid rgba(0, 0, 0, 0.08);
+  border-top: 1px solid rgba(180, 170, 160, 0.15);
+  background: rgba(45, 42, 40, 0.95);
 }
 
 .settings-footer .btn-confirm {
   padding: 10px 24px;
-  background: #8e44ad;
-  color: white;
+  background: #c4a77d;
+  color: #2d2a28;
   border: none;
   border-radius: 6px;
   font-family: inherit;
@@ -930,6 +963,6 @@ export default {
 }
 
 .settings-footer .btn-confirm:hover {
-  background: #5a4a69;
+  background: #d4b78d;
 }
 </style>

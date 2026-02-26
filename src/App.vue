@@ -1,10 +1,20 @@
 <template>
   <div id="app" :class="{ 'is-mobile': isMobile, 'is-desktop': !isMobile }">
-    <MainMenu v-if="gameStore.gamePhase === 'menu' && !isSetGameStarted" />
-    <SetGameMobile v-else-if="isMobile && isSetGameStarted && setStore.gamePhase !== 'gameOver'" />
-    <SetGamePC v-else-if="!isMobile && isSetGameStarted && setStore.gamePhase !== 'gameOver'" />
-    <TripleCardBattleMobile v-else-if="isMobile && gameStore.gamePhase !== 'gameOver' && !isSetGameStarted" />
-    <TripleCardBattlePC v-else-if="!isMobile && gameStore.gamePhase !== 'gameOver' && !isSetGameStarted" />
+    <!-- 吹牛皮游戏 -->
+    <BluffGameMobile v-if="bluffStore.gamePhase !== 'menu' && isMobile" @back-to-menu="handleBackToMenu" />
+    <BluffGame v-else-if="bluffStore.gamePhase !== 'menu' && !isMobile" @back-to-menu="handleBackToMenu" />
+    <!-- 主菜单 -->
+    <MainMenu v-else-if="gameStore.gamePhase === 'menu' && !isSetGameStarted && !isBluffGameStarted" />
+    <!-- 形色牌游戏 -->
+    <SetGameMobile v-else-if="isMobile && isSetGameStarted && setStore.gamePhase !== 'gameOver'"
+      @back-to-menu="handleBackToMenu" />
+    <SetGamePC v-else-if="!isMobile && isSetGameStarted && setStore.gamePhase !== 'gameOver'"
+      @back-to-menu="handleBackToMenu" />
+    <!-- 三卡对决 -->
+    <TripleCardBattleMobile v-else-if="isMobile && gameStore.gamePhase !== 'gameOver' && !isSetGameStarted"
+      @back-to-menu="handleBackToMenu" />
+    <TripleCardBattlePC v-else-if="!isMobile && gameStore.gamePhase !== 'gameOver' && !isSetGameStarted"
+      @back-to-menu="handleBackToMenu" />
     <ResultDisplay v-if="gameStore.gamePhase === 'gameOver' || setStore.gamePhase === 'gameOver'" />
   </div>
 </template>
@@ -17,8 +27,11 @@ import TripleCardBattleMobile from './components/TripleCardBattleMobile.vue'
 import SetGamePC from './components/SetGamePC.vue'
 import SetGameMobile from './components/SetGameMobile.vue'
 import ResultDisplay from './components/ResultDisplay.vue'
+import BluffGame from './components/BluffGame.vue'
+import BluffGameMobile from './components/BluffGameMobile.vue'
 import gameStore from './store/gameStore.js'
 import setGameStore from './store/setGameStore.js'
+import bluffStore from './store/bluffGameStore.js'
 import deviceDetector from './utils/deviceDetector.js'
 
 export default {
@@ -29,17 +42,28 @@ export default {
     TripleCardBattleMobile,
     SetGamePC,
     SetGameMobile,
-    ResultDisplay
+    ResultDisplay,
+    BluffGame,
+    BluffGameMobile
   },
-  setup() {
+  setup () {
     const isMobile = ref(false)
     const isSetGameStarted = ref(false)
+    const isBluffGameStarted = ref(false)
 
     const setStore = setGameStore
     const isSetGame = computed(() => setStore.gamePhase !== 'menu' && setStore.gamePhase !== 'gameOver')
 
     const checkDevice = () => {
       isMobile.value = deviceDetector.isMobile()
+    }
+
+    const handleBackToMenu = () => {
+      isBluffGameStarted.value = false
+      isSetGameStarted.value = false
+      bluffStore.backToMenu()
+      setStore.backToMenu()
+      gameStore.backToMenu()
     }
 
     onMounted(() => {
@@ -66,11 +90,22 @@ export default {
       }
     })
 
+    watch(() => bluffStore.gamePhase, (newPhase) => {
+      if (newPhase === 'playing' || newPhase === 'gameOver') {
+        isBluffGameStarted.value = true
+      } else if (newPhase === 'menu') {
+        isBluffGameStarted.value = false
+      }
+    })
+
     return {
       gameStore,
       setStore,
+      bluffStore,
       isMobile,
-      isSetGameStarted
+      isSetGameStarted,
+      isBluffGameStarted,
+      handleBackToMenu
     }
   }
 }

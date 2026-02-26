@@ -6,9 +6,14 @@
           <span class="logo-icon">◈</span>
           <span class="logo-text">三卡对决</span>
         </div>
-        <button class="rules-btn" @click="showRules = true">
-          <span>?</span>
-        </button>
+        <div class="header-actions">
+          <button class="rules-btn home-btn" @click="backToMenu">
+            <span>⌂</span>
+          </button>
+          <button class="rules-btn" @click="showRules = true">
+            <span>?</span>
+          </button>
+        </div>
       </div>
       <div class="header-stats">
         <div class="stat-item">
@@ -234,6 +239,58 @@
         </div>
       </div>
     </div>
+
+    <div class="rules-modal" v-if="showSettings" @click.self="showSettings = false">
+      <div class="rules-content">
+        <div class="rules-header">
+          <h2>游戏设置</h2>
+        </div>
+        <div class="rules-body">
+          <div class="settings-group">
+            <div class="settings-label">
+              <span class="label-dot"></span>
+              电脑玩家数量
+            </div>
+            <div class="slider-wrapper">
+              <input 
+                type="range" 
+                v-model="settingsCpuCount" 
+                min="1" 
+                max="3" 
+                class="slider"
+              />
+              <div class="slider-marks">
+                <span>1</span><span>2</span><span>3</span>
+              </div>
+            </div>
+            <div class="settings-value">{{ settingsCpuCount }} 人</div>
+          </div>
+          
+          <div class="settings-group">
+            <div class="settings-label">
+              <span class="label-dot"></span>
+              游戏轮数
+            </div>
+            <div class="slider-wrapper">
+              <input 
+                type="range" 
+                v-model="settingsRoundCount" 
+                min="3" 
+                max="7" 
+                class="slider"
+              />
+              <div class="slider-marks">
+                <span>3</span><span>5</span><span>7</span>
+              </div>
+            </div>
+            <div class="settings-value">{{ settingsRoundCount }} 轮</div>
+          </div>
+        </div>
+        <div class="settings-footer">
+          <button class="btn-confirm" @click="confirmSettings">开始游戏</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -243,13 +300,25 @@ import gameStore from '../store/gameStore.js'
 
 export default {
   name: 'TripleCardBattleMobile',
-  setup () {
+  emits: ['back-to-menu'],
+  setup (props, { emit }) {
     const selectedCardIndex = ref(null)
     const sortMode = ref('rank')
     const showRules = ref(false)
+    const showSettings = ref(true)
+    const settingsCpuCount = ref(1)
+    const settingsRoundCount = ref(5)
     const activeZone = ref('single')
     const isLandscape = ref(false)
     const resultTab = ref('score')
+
+    const confirmSettings = () => {
+      gameStore.playerCount = Number(settingsCpuCount.value) + 1
+      gameStore.totalRounds = Number(settingsRoundCount.value)
+      gameStore.initGame(Number(settingsCpuCount.value) + 1, Number(settingsRoundCount.value))
+      gameStore.startNewRound()
+      showSettings.value = false
+    }
 
     const zoneTabs = [
       { key: 'single', name: '单张', required: 1 },
@@ -572,6 +641,9 @@ export default {
       canConfirm,
       selectedCardIndex,
       showRules,
+      showSettings,
+      settingsCpuCount,
+      settingsRoundCount,
       activeZone,
       isLandscape,
       zoneTabs,
@@ -596,7 +668,9 @@ export default {
       resetHand,
       toggleSort,
       confirmGroup,
-      handleNext
+      handleNext,
+      confirmSettings,
+      backToMenu: () => emit('back-to-menu')
     }
   }
 }
@@ -606,20 +680,36 @@ export default {
 .mobile-game {
   min-height: 100vh;
   min-height: 100dvh;
-  background: #0a0a0c;
+  background: #1a1a1a;
   display: flex;
   flex-direction: column;
   font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
   overflow: hidden;
+  position: relative;
+}
+
+/* 噪点纹理覆盖层 */
+.mobile-game::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+  opacity: 0.12;
+  pointer-events: none;
+  z-index: 1;
 }
 
 .mobile-header {
-  background: rgba(20, 20, 25, 0.95);
+  background: rgba(45, 42, 40, 0.95);
   padding: 8px 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(180, 170, 160, 0.12);
   position: sticky;
   top: 0;
   z-index: 10;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2);
 }
 
 .header-top {
@@ -627,6 +717,12 @@ export default {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 8px;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .logo {
@@ -637,13 +733,13 @@ export default {
 
 .logo-icon {
   font-size: 20px;
-  color: #3b82f6;
+  color: #c4a77d;
 }
 
 .logo-text {
   font-size: 16px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.9);
+  color: rgba(245, 240, 230, 0.95);
   letter-spacing: 1px;
 }
 
@@ -653,10 +749,10 @@ export default {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(59, 130, 246, 0.15);
-  border: 1px solid rgba(59, 130, 246, 0.3);
+  background: rgba(196, 167, 125, 0.15);
+  border: 1px solid rgba(196, 167, 125, 0.3);
   border-radius: 50%;
-  color: #3b82f6;
+  color: #c4a77d;
   font-size: 16px;
   font-weight: 600;
 }
@@ -664,7 +760,7 @@ export default {
 .header-stats {
   display: flex;
   justify-content: space-around;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(60, 57, 54, 0.5);
   border-radius: 8px;
   padding: 8px;
 }
@@ -678,13 +774,13 @@ export default {
 
 .stat-label {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.5);
+  color: rgba(180, 170, 160, 0.6);
 }
 
 .stat-value {
   font-size: 16px;
   font-weight: 600;
-  color: #3b82f6;
+  color: #c4a77d;
 }
 
 .status-text {
@@ -712,25 +808,26 @@ export default {
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  background: rgba(20, 20, 25, 0.8);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(50, 47, 44, 0.85);
+  border: 1px solid rgba(180, 170, 160, 0.12);
   border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 
 .player-chip.is-me {
-  border-color: rgba(59, 130, 246, 0.4);
-  background: rgba(59, 130, 246, 0.1);
+  border-color: rgba(196, 167, 125, 0.4);
+  background: rgba(196, 167, 125, 0.1);
 }
 
 .chip-name {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.7);
+  color: rgba(200, 190, 180, 0.75);
 }
 
 .chip-score {
   font-size: 16px;
   font-weight: 600;
-  color: #3b82f6;
+  color: #c4a77d;
 }
 
 .zones-container {
@@ -751,16 +848,16 @@ export default {
   justify-content: center;
   gap: 8px;
   padding: 8px;
-  background: rgba(20, 20, 25, 0.8);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(50, 47, 44, 0.85);
+  border: 1px solid rgba(180, 170, 160, 0.12);
   border-radius: 8px;
-  color: rgba(255, 255, 255, 0.6);
+  color: rgba(180, 170, 160, 0.7);
 }
 
 .zone-tab.is-active {
-  border-color: #3b82f6;
-  background: rgba(59, 130, 246, 0.15);
-  color: #fff;
+  border-color: #c4a77d;
+  background: rgba(196, 167, 125, 0.15);
+  color: #f5f0e6;
 }
 
 .tab-name {
@@ -770,25 +867,25 @@ export default {
 
 .tab-count {
   font-size: 12px;
-  color: #3b82f6;
+  color: #c4a77d;
 }
 
 .zone-display {
-  background: rgba(20, 20, 25, 0.6);
+  background: rgba(50, 47, 44, 0.6);
   border-radius: 12px;
   padding: 8px;
 }
 
 .zone-area {
-  background: rgba(30, 30, 35, 0.8);
-  border: 2px dashed rgba(255, 255, 255, 0.15);
+  background: rgba(60, 57, 54, 0.8);
+  border: 2px dashed rgba(180, 170, 160, 0.18);
   border-radius: 12px;
   padding: 8px;
   min-height: 80px;
 }
 
 .zone-area.zone-ready {
-  border-color: #22c55e;
+  border-color: #8b9a6d;
   border-style: solid;
 }
 
@@ -798,14 +895,14 @@ export default {
   align-items: center;
   margin-bottom: 8px;
   font-size: 14px;
-  color: #3b82f6;
+  color: #c4a77d;
   font-weight: 500;
 }
 
 .zone-weight {
   font-size: 12px;
   padding: 2px 8px;
-  background: rgba(59, 130, 246, 0.2);
+  background: rgba(196, 167, 125, 0.2);
   border-radius: 4px;
 }
 
@@ -819,33 +916,34 @@ export default {
 
 .zone-card {
   padding: 6px 10px;
-  background: #fff;
+  background: #f0ece5;
   border-radius: 6px;
   font-weight: bold;
   font-size: 16px;
   min-width: 40px;
   text-align: center;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
 }
 
 .zone-card.card-slot {
-  background: rgba(255, 255, 255, 0.05);
-  border: 2px dashed rgba(255, 255, 255, 0.2);
+  background: rgba(60, 57, 54, 0.4);
+  border: 2px dashed rgba(180, 170, 160, 0.25);
   min-width: 50px;
   min-height: 32px;
 }
 
 .slot-text {
   font-size: 10px;
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(180, 170, 160, 0.5);
   text-align: center;
 }
 
 .zone-card.card-red {
-  color: #ef4444;
+  color: #b56565;
 }
 
 .zone-card.card-black {
-  color: #000;
+  color: #4a4a4a;
 }
 
 .card-text {
@@ -858,14 +956,14 @@ export default {
   align-items: center;
   gap: 8px;
   padding: 8px;
-  background: rgba(0, 87, 163, 0.2);
+  background: rgba(100, 95, 90, 0.3);
   border-radius: 6px;
   margin-top: 8px;
 }
 
 .other-label {
   font-size: 12px;
-  color: #3b82f6;
+  color: #c4a77d;
   min-width: 24px;
 }
 
@@ -877,38 +975,40 @@ export default {
 
 .other-card {
   padding: 6px 10px;
-  background: #fff;
+  background: #e8e4df;
   border-radius: 6px;
   font-size: 16px;
   font-weight: bold;
   min-width: 40px;
   text-align: center;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
 }
 
 .other-card.card-red {
-  color: #ef4444;
+  color: #b56565;
 }
 
 .other-card.card-black {
-  color: #000;
+  color: #4a4a4a;
 }
 
 .other-card.card-back {
-  background: linear-gradient(135deg, #1e3a5f 25%, #2563eb 25%, #2563eb 50%, #1e3a5f 50%, #1e3a5f 75%, #2563eb 75%);
+  background: linear-gradient(135deg, #4a4540 25%, #6a6560 25%, #6a6560 50%, #4a4540 50%, #4a4540 75%, #6a6560 75%);
   background-size: 6px 6px;
   color: transparent;
   min-height: 28px;
 }
 
 .result-container {
-  background: rgba(20, 20, 25, 0.8);
+  background: rgba(50, 47, 44, 0.85);
   border-radius: 12px;
   padding: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
 }
 
 .result-header {
   font-size: 16px;
-  color: #3b82f6;
+  color: #c4a77d;
   text-align: center;
   margin-bottom: 12px;
   font-weight: 600;
@@ -923,23 +1023,23 @@ export default {
 .result-tab {
   flex: 1;
   padding: 8px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(60, 57, 54, 0.5);
+  border: 1px solid rgba(180, 170, 160, 0.12);
   border-radius: 8px;
-  color: rgba(255, 255, 255, 0.6);
+  color: rgba(180, 170, 160, 0.7);
   font-size: 14px;
   font-weight: 500;
   transition: all 0.2s;
 }
 
 .result-tab.is-active {
-  background: rgba(59, 130, 246, 0.2);
-  border-color: #3b82f6;
-  color: #3b82f6;
+  background: rgba(196, 167, 125, 0.18);
+  border-color: #c4a77d;
+  color: #c4a77d;
 }
 
 .result-cards-display {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(60, 57, 54, 0.4);
   border-radius: 8px;
   padding: 12px;
   margin-bottom: 12px;
@@ -955,12 +1055,12 @@ export default {
 
 .cards-section-header {
   font-size: 14px;
-  color: #3b82f6;
+  color: #c4a77d;
   font-weight: 500;
   margin-bottom: 8px;
   text-align: center;
   padding-bottom: 4px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid rgba(180, 170, 160, 0.12);
 }
 
 .cards-grid {
@@ -974,13 +1074,13 @@ export default {
   align-items: center;
   justify-content: space-between;
   padding: 8px;
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(60, 57, 54, 0.35);
   border-radius: 6px;
 }
 
 .player-label {
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.8);
+  color: rgba(220, 210, 200, 0.85);
   min-width: 60px;
 }
 
@@ -1008,42 +1108,43 @@ export default {
 
 .player-rank {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.6);
+  color: rgba(180, 170, 160, 0.65);
 }
 
 .player-score {
   font-size: 14px;
   font-weight: 600;
-  color: #22c55e;
+  color: #8b9a6d;
 }
 
 .zone-card-mini {
   padding: 4px 8px;
-  background: #fff;
+  background: #e8e4df;
   border-radius: 4px;
   font-size: 12px;
   font-weight: bold;
   width: 44px;
   text-align: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 .zone-card-mini.card-red {
-  color: #ef4444;
+  color: #b56565;
 }
 
 .zone-card-mini.card-black {
-  color: #000;
+  color: #4a4a4a;
 }
 
 .zone-card-mini.card-back {
-  background: linear-gradient(135deg, #1e3a5f 25%, #2563eb 25%, #2563eb 50%, #1e3a5f 50%, #1e3a5f 75%, #2563eb 75%);
+  background: linear-gradient(135deg, #4a4540 25%, #6a6560 25%, #6a6560 50%, #4a4540 50%, #4a4540 75%, #6a6560 75%);
   background-size: 4px 4px;
   color: transparent;
   min-height: 24px;
 }
 
 .result-group-scores {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(60, 57, 54, 0.4);
   border-radius: 8px;
   padding: 8px;
   margin-bottom: 12px;
@@ -1053,7 +1154,7 @@ export default {
   display: flex;
   justify-content: space-between;
   padding: 6px 4px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid rgba(180, 170, 160, 0.12);
   margin-bottom: 6px;
 }
 
@@ -1061,7 +1162,7 @@ export default {
   flex: 1;
   text-align: center;
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.5);
+  color: rgba(180, 170, 160, 0.6);
 }
 
 .group-col:first-child {
@@ -1074,7 +1175,7 @@ export default {
   justify-content: space-between;
   align-items: center;
   padding: 8px 4px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(180, 170, 160, 0.06);
 }
 
 .group-score-row:last-child {
@@ -1083,30 +1184,30 @@ export default {
 
 .group-name {
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.8);
+  color: rgba(220, 210, 200, 0.85);
   font-weight: 500;
 }
 
 .group-score {
   font-size: 14px;
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(180, 170, 160, 0.5);
 }
 
 .group-score.score-positive {
-  color: #22c55e;
+  color: #8b9a6d;
   font-weight: 600;
 }
 
 .group-total {
   font-size: 15px;
   font-weight: 600;
-  color: #3b82f6;
+  color: #c4a77d;
 }
 
 .group-accumulated {
   font-size: 15px;
   font-weight: 600;
-  color: #f59e0b;
+  color: #b88a6f;
 }
 
 
@@ -1115,20 +1216,21 @@ export default {
   width: 100%;
   padding: 8px;
   margin-top: 8px;
-  background: #3b82f6;
+  background: #c4a77d;
   border: none;
   border-radius: 8px;
-  color: #fff;
+  color: #2d2a28;
   font-size: 16px;
   font-weight: 600;
   letter-spacing: 1px;
 }
 
 .mobile-hand {
-  background: rgba(20, 20, 25, 0.98);
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(45, 42, 40, 0.95);
+  border-top: 1px solid rgba(180, 170, 160, 0.12);
   padding: 8px;
   padding-bottom: calc(8px + env(safe-area-inset-bottom, 0));
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.25);
 }
 
 .hand-header {
@@ -1140,7 +1242,7 @@ export default {
 
 .hand-title {
   font-size: 14px;
-  color: #3b82f6;
+  color: #c4a77d;
   font-weight: 500;
 }
 
@@ -1151,27 +1253,27 @@ export default {
 
 .btn-small {
   padding: 6px 12px;
-  background: rgba(59, 130, 246, 0.15);
-  border: 1px solid rgba(59, 130, 246, 0.3);
+  background: rgba(196, 167, 125, 0.15);
+  border: 1px solid rgba(196, 167, 125, 0.3);
   border-radius: 6px;
-  color: #3b82f6;
+  color: #c4a77d;
   font-size: 12px;
 }
 
 .btn-confirm-small {
   padding: 6px 12px;
-  background: #3b82f6;
-  border: 1px solid #3b82f6;
+  background: #c4a77d;
+  border: 1px solid #c4a77d;
   border-radius: 6px;
-  color: #fff;
+  color: #2d2a28;
   font-size: 12px;
   font-weight: 500;
 }
 
 .btn-confirm-small:disabled {
-  background: rgba(59, 130, 246, 0.3);
-  border-color: rgba(59, 130, 246, 0.3);
-  color: rgba(255, 255, 255, 0.5);
+  background: rgba(196, 167, 125, 0.3);
+  border-color: rgba(196, 167, 125, 0.3);
+  color: rgba(200, 190, 180, 0.5);
 }
 
 .hand-grid {
@@ -1189,25 +1291,26 @@ export default {
   align-items: center;
   justify-content: center;
   gap: 2px;
-  background: #fff;
+  background: #f0ece5;
   border-radius: 6px;
   border: 2px solid transparent;
   font-weight: bold;
   transition: transform 0.15s, border-color 0.15s;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
 }
 
 .hand-card.is-selected {
-  border-color: #3b82f6;
+  border-color: #c4a77d;
   transform: translateY(-4px);
-  box-shadow: 0 6px 16px rgba(59, 130, 246, 0.3);
+  box-shadow: 0 6px 16px rgba(196, 167, 125, 0.25);
 }
 
 .hand-card.card-red {
-  color: #ef4444;
+  color: #b56565;
 }
 
 .hand-card.card-black {
-  color: #000;
+  color: #4a4a4a;
 }
 
 .card-rank {
@@ -1225,7 +1328,7 @@ export default {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.85);
+  background: rgba(30, 28, 26, 0.92);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1234,8 +1337,8 @@ export default {
 }
 
 .rules-content {
-  background: #141419;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: #2d2a28;
+  border: 1px solid rgba(180, 170, 160, 0.15);
   border-radius: 12px;
   width: 100%;
   max-width: 400px;
@@ -1243,6 +1346,7 @@ export default {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
 }
 
 .rules-header {
@@ -1250,13 +1354,13 @@ export default {
   justify-content: space-between;
   align-items: center;
   padding: 8px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid rgba(180, 170, 160, 0.12);
 }
 
 .rules-header h2 {
   margin: 0;
   font-size: 18px;
-  color: rgba(255, 255, 255, 0.95);
+  color: rgba(245, 240, 230, 0.95);
 }
 
 .rules-close {
@@ -1265,10 +1369,10 @@ export default {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(180, 170, 160, 0.08);
+  border: 1px solid rgba(180, 170, 160, 0.15);
   border-radius: 6px;
-  color: rgba(255, 255, 255, 0.7);
+  color: rgba(200, 190, 180, 0.7);
   font-size: 24px;
 }
 
@@ -1285,13 +1389,13 @@ export default {
 .rules-section h3 {
   margin: 0 0 8px 0;
   font-size: 14px;
-  color: #3b82f6;
+  color: #c4a77d;
 }
 
 .rules-section p {
   margin: 0 0 8px 0;
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.7);
+  color: rgba(200, 190, 180, 0.8);
   line-height: 1.6;
 }
 
@@ -1299,8 +1403,97 @@ export default {
   margin: 0;
   padding-left: 20px;
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.7);
+  color: rgba(200, 190, 180, 0.8);
   line-height: 1.8;
+}
+
+.settings-group {
+  margin-bottom: 20px;
+}
+
+.settings-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: rgba(180, 170, 160, 0.65);
+  margin-bottom: 12px;
+  letter-spacing: 1px;
+}
+
+.settings-label .label-dot {
+  width: 6px;
+  height: 6px;
+  background: #c4a77d;
+  border-radius: 50%;
+}
+
+.slider-wrapper {
+  padding: 0 2px;
+}
+
+.settings-group .slider {
+  width: 100%;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(180, 170, 160, 0.15);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+.settings-group .slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  background: #c4a77d;
+  border-radius: 2px;
+  cursor: pointer;
+  box-shadow: 0 0 10px rgba(196, 167, 125, 0.35);
+}
+
+.slider-marks {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 10px;
+  color: rgba(180, 170, 160, 0.4);
+}
+
+.settings-value {
+  text-align: center;
+  font-size: 20px;
+  font-weight: 300;
+  color: #c4a77d;
+  margin-top: 10px;
+  letter-spacing: 2px;
+}
+
+.settings-footer {
+  padding: 12px 16px;
+  border-top: 1px solid rgba(180, 170, 160, 0.12);
+  display: flex;
+  justify-content: center;
+}
+
+.btn-confirm {
+  padding: 10px 32px;
+  font-size: 14px;
+  font-family: inherit;
+  letter-spacing: 1px;
+  background: #c4a77d;
+  border: none;
+  border-radius: 6px;
+  color: #2d2a28;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-confirm:hover {
+  background: #d4b78d;
+  box-shadow: 0 0 15px rgba(196, 167, 125, 0.35);
 }
 
 .mobile-game.is-landscape .mobile-hand {

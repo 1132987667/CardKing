@@ -226,7 +226,7 @@ class GameStore {
           }
         }
         
-        const groups = AIPlayer.decide(player.hand, 'enumerate')
+        const groups = AIPlayer.decide(player.hand, 'smart')
         
         this.playerGroups[player.id].single[subRoundIndex] = [groups.single[0] || -1]
         this.playerGroups[player.id].twentyFourPoint[subRoundIndex] = [groups.twentyFourPoint[0] || -1, groups.twentyFourPoint[1] || -1]
@@ -348,6 +348,22 @@ class GameStore {
   endGame() {
     this.gamePhase = 'gameOver'
     this.winner = this.getFinalResult()
+  }
+
+  backToMenu() {
+    this.gamePhase = 'menu'
+    this.currentRound = 0
+    this.subRound = 1
+    state.players = []
+    state.playerGroups = {}
+    state.roundScores = {}
+    state.tempRoundScores = {}
+    state.firstRoundGroupScores = {}
+    state.groupScores = {}
+    state.currentRoundGroupScores = {}
+    state.totalScores = {}
+    state.winner = null
+    state.playerHandBackup = []
   }
 
   validateGroups(groups) {

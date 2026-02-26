@@ -287,14 +287,21 @@ class SetGameStore {
     if (hint.length > 0) {
       if (state.hintsFree > 0) {
         state.hintsFree--
-        state.hintCards = hint
-        state.showHint = true
       } else {
-        state.hintCards = hint
-        state.showHint = true
         state.hintsUsed++
         state.score -= 50
       }
+      state.hintCards = hint
+      state.showHint = true
+      
+      // 5秒后自动隐藏提示
+      if (state.hintTimeout) {
+        clearTimeout(state.hintTimeout)
+      }
+      state.hintTimeout = setTimeout(() => {
+        state.showHint = false
+        state.hintCards = []
+      }, 5000)
     }
   }
 
@@ -317,13 +324,40 @@ class SetGameStore {
     this.stopTimer()
     state.gamePhase = 'gameOver'
     state.isGameOver = true
-    
+
     if (state.playerSetCount > state.computerSetCount) {
       state.winner = 'player'
     } else if (state.playerSetCount < state.computerSetCount) {
       state.winner = 'computer'
     } else {
       state.winner = 'tie'
+    }
+  }
+
+  backToMenu() {
+    this.stopTimer()
+    state.gamePhase = 'menu'
+    state.score = 0
+    state.timeElapsed = 0
+    state.deck = []
+    state.boardCards = []
+    state.selectedCards = []
+    state.playerFoundSets = []
+    state.playerSetCount = 0
+    state.computerSetCount = 0
+    state.hintsUsed = 0
+    state.hintsFree = 3
+    state.showHint = false
+    state.hintCards = []
+    state.isGameOver = false
+    state.winner = null
+    state.animationState = {
+      active: false,
+      cards: [],
+      scoreAnimation: null,
+      scoreValue: 0,
+      scoreTargetX: 0,
+      scoreTargetY: 0
     }
   }
 

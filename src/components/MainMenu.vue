@@ -5,13 +5,21 @@
         <h1>目录 CONTENTS</h1>
         <span>Vol. 2024</span>
       </header>
-      
+
       <nav>
         <ul class="toc-list">
           <li>
-            <a href="#" class="toc-item" @click.prevent="startTripleCardGame">
+            <a href="#" class="toc-item" @click.prevent="startBluffGame">
               <div class="toc-content">
                 <span class="game-index">01</span>
+                <span class="game-title">吹牛皮</span>
+              </div>
+            </a>
+          </li>
+          <li>
+            <a href="#" class="toc-item" @click.prevent="startTripleCardGame">
+              <div class="toc-content">
+                <span class="game-index">02</span>
                 <span class="game-title">三卡对决</span>
               </div>
             </a>
@@ -19,7 +27,7 @@
           <li>
             <a href="#" class="toc-item" @click.prevent="startSetGame">
               <div class="toc-content">
-                <span class="game-index">02</span>
+                <span class="game-index">03</span>
                 <span class="game-title">形色牌</span>
               </div>
             </a>
@@ -27,7 +35,7 @@
           <li>
             <a href="#" class="toc-item" @click.prevent="showSettings = true">
               <div class="toc-content">
-                <span class="game-index">03</span>
+                <span class="game-index">04</span>
                 <span class="game-title">游戏设置</span>
               </div>
             </a>
@@ -35,14 +43,14 @@
           <li>
             <a href="#" class="toc-item" @click.prevent="showRules = true">
               <div class="toc-content">
-                <span class="game-index">04</span>
+                <span class="game-index">05</span>
                 <span class="game-title">规则说明</span>
               </div>
             </a>
           </li>
         </ul>
       </nav>
-      
+
       <footer class="page-footer">
         <span class="page-number">- 1 -</span>
       </footer>
@@ -61,33 +69,21 @@
               电脑玩家数量
             </div>
             <div class="slider-wrapper">
-              <input 
-                type="range" 
-                v-model="cpuCount" 
-                min="1" 
-                max="3" 
-                class="slider"
-              />
+              <input type="range" v-model="cpuCount" min="1" max="3" class="slider" />
               <div class="slider-marks">
                 <span>1</span><span>2</span><span>3</span>
               </div>
             </div>
             <div class="settings-value">{{ cpuCount }} 人</div>
           </div>
-          
+
           <div class="settings-group">
             <div class="settings-label">
               <span class="label-dot"></span>
               游戏轮数
             </div>
             <div class="slider-wrapper">
-              <input 
-                type="range" 
-                v-model="roundCount" 
-                min="3" 
-                max="7" 
-                class="slider"
-              />
+              <input type="range" v-model="roundCount" min="3" max="7" class="slider" />
               <div class="slider-marks">
                 <span>3</span><span>5</span><span>7</span>
               </div>
@@ -123,7 +119,7 @@
             <h3>游戏流程（每轮）</h3>
             <h4>1. 发牌</h4>
             <p>每轮开始前彻底洗牌，根据当前玩家总数 N，为每位玩家发放 12 张牌。剩余牌（52 - N×12）本轮弃用。</p>
-            
+
             <h4>2. 分组阶段</h4>
             <p>玩家将 12 张手牌分成 6 组：</p>
             <ul>
@@ -131,7 +127,7 @@
               <li>24点（2张×2组）：各放入 2 张牌</li>
               <li>比三张（3张×2组）：各放入 3 张牌</li>
             </ul>
-            
+
             <h4>3. 确认与结算</h4>
             <p>玩家确认分组后，各组独立比大小或计算，得出排名并累计积分。</p>
           </div>
@@ -163,14 +159,19 @@
 import { ref } from 'vue'
 import gameStore from '../store/gameStore.js'
 import setGameStore from '../store/setGameStore.js'
+import bluffStore from '../store/bluffGameStore.js'
 
 export default {
   name: 'MainMenu',
-  setup() {
+  setup () {
     const cpuCount = ref(1)
     const roundCount = ref(5)
     const showSettings = ref(false)
     const showRules = ref(false)
+
+    const startBluffGame = () => {
+      bluffStore.initGame()
+    }
 
     const startTripleCardGame = () => {
       gameStore.initGame(Number(cpuCount.value) + 1, Number(roundCount.value))
@@ -187,6 +188,7 @@ export default {
       roundCount,
       showSettings,
       showRules,
+      startBluffGame,
       startTripleCardGame,
       startSetGame
     }
@@ -228,7 +230,7 @@ export default {
   padding: 80px 40px;
   box-sizing: border-box;
   position: relative;
-  box-shadow: inset 20px 0 40px -20px rgba(0,0,0,0.05); 
+  box-shadow: inset 20px 0 40px -20px rgba(0, 0, 0, 0.05);
 }
 
 .page-header {
@@ -531,6 +533,7 @@ export default {
   .book-page {
     padding: 40px 20px;
   }
+
   .game-title {
     font-size: 1rem;
   }
