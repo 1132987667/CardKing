@@ -9,7 +9,7 @@
       <nav>
         <ul class="toc-list">
           <li>
-            <a href="#" class="toc-item" @click.prevent="startGame">
+            <a href="#" class="toc-item" @click.prevent="startTripleCardGame">
               <div class="toc-content">
                 <span class="game-index">01</span>
                 <span class="game-title">三卡对决</span>
@@ -17,9 +17,17 @@
             </a>
           </li>
           <li>
-            <a href="#" class="toc-item" @click.prevent="showSettings = true">
+            <a href="#" class="toc-item" @click.prevent="startSetGame">
               <div class="toc-content">
                 <span class="game-index">02</span>
+                <span class="game-title">形色牌</span>
+              </div>
+            </a>
+          </li>
+          <li>
+            <a href="#" class="toc-item" @click.prevent="showSettings = true">
+              <div class="toc-content">
+                <span class="game-index">03</span>
                 <span class="game-title">游戏设置</span>
               </div>
             </a>
@@ -27,7 +35,7 @@
           <li>
             <a href="#" class="toc-item" @click.prevent="showRules = true">
               <div class="toc-content">
-                <span class="game-index">03</span>
+                <span class="game-index">04</span>
                 <span class="game-title">规则说明</span>
               </div>
             </a>
@@ -154,6 +162,7 @@
 <script>
 import { ref } from 'vue'
 import gameStore from '../store/gameStore.js'
+import setGameStore from '../store/setGameStore.js'
 
 export default {
   name: 'MainMenu',
@@ -163,9 +172,14 @@ export default {
     const showSettings = ref(false)
     const showRules = ref(false)
 
-    const startGame = () => {
+    const startTripleCardGame = () => {
       gameStore.initGame(Number(cpuCount.value) + 1, Number(roundCount.value))
       gameStore.startNewRound()
+      gameStore.gameType = 'tripleCard'
+    }
+
+    const startSetGame = () => {
+      setGameStore.startGame()
     }
 
     return {
@@ -173,7 +187,8 @@ export default {
       roundCount,
       showSettings,
       showRules,
-      startGame
+      startTripleCardGame,
+      startSetGame
     }
   }
 }

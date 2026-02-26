@@ -3,7 +3,46 @@
     <div class="bg-grid"></div>
     
     <div class="panel">
-      <div v-if="gameStore.gamePhase === 'roundResult'" class="round-result">
+      <div v-if="isSetGame" class="set-result">
+        <div class="panel-header">
+          <div class="panel-title">游戏结束</div>
+        </div>
+        
+        <div class="panel-body">
+          <div class="winner-block">
+            <div class="winner-label">找到组合</div>
+            <div class="winner-name">{{ setStore.playerSetCount }}</div>
+            <div class="winner-score">共 {{ setStore.totalSetsInDeck }} 个</div>
+          </div>
+
+          <div class="set-stats">
+            <div class="stat-row">
+              <span class="stat-label">得分</span>
+              <span class="stat-value">{{ setStore.score }}</span>
+            </div>
+            <div class="stat-row">
+              <span class="stat-label">用时</span>
+              <span class="stat-value">{{ formatTime(setStore.timeElapsed) }}</span>
+            </div>
+            <div class="stat-row">
+              <span class="stat-label">提示次数</span>
+              <span class="stat-value">{{ setStore.hintsUsed }}</span>
+            </div>
+            <div class="stat-row">
+              <span class="stat-label">免费提示</span>
+              <span class="stat-value">{{ setStore.hintsFree }}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-footer">
+          <button class="btn btn-highlight" @click="backToSetMenu">
+            返回主菜单
+          </button>
+        </div>
+      </div>
+
+      <div v-else-if="gameStore.gamePhase === 'roundResult'" class="round-result">
         <div class="panel-header">
           <div class="panel-title">第 {{ gameStore.currentRound }} 轮结算</div>
         </div>
@@ -72,10 +111,17 @@
 <script>
 import { computed } from 'vue'
 import gameStore from '../store/gameStore.js'
+import setGameStore from '../store/setGameStore.js'
 
 export default {
   name: 'ResultDisplay',
   setup() {
+    const setStore = setGameStore
+
+    const isSetGame = computed(() => {
+      return setStore.gamePhase === 'gameOver'
+    })
+
     const sortedPlayers = computed(() => {
       return [...gameStore.players]
         .map(p => ({
@@ -95,13 +141,28 @@ export default {
 
     const backToMenu = () => {
       gameStore.reset()
+      setStore.reset()
+    }
+
+    const backToSetMenu = () => {
+      setStore.reset()
+    }
+
+    const formatTime = (seconds) => {
+      const mins = Math.floor(seconds / 60)
+      const secs = seconds % 60
+      return `${mins}:${secs.toString().padStart(2, '0')}`
     }
 
     return {
       gameStore,
+      setStore,
+      isSetGame,
       sortedPlayers,
       nextRound,
-      backToMenu
+      backToMenu,
+      backToSetMenu,
+      formatTime
     }
   }
 }
@@ -228,6 +289,33 @@ export default {
 .winner-score {
   font-size: 14px;
   color: rgba(255, 255, 255, 0.5);
+}
+
+.set-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.stat-label {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.stat-value {
+  font-size: 14px;
+  color: #8e44ad;
+  font-weight: 600;
 }
 
 .rankings-title {

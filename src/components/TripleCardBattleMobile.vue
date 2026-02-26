@@ -242,7 +242,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import gameStore from '../store/gameStore.js'
 
 export default {
-  name: 'MobileGameMain',
+  name: 'TripleCardBattleMobile',
   setup () {
     const selectedCardIndex = ref(null)
     const sortMode = ref('rank')

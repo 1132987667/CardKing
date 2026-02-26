@@ -4,6 +4,7 @@ import RuleEvaluator from '../utils/RuleEvaluator.js'
 import { reactive, readonly } from 'vue'
 
 const state = reactive({
+  gameType: 'tripleCard',
   playerCount: 2,
   totalRounds: 5,
   currentRound: 0,
@@ -24,6 +25,9 @@ const state = reactive({
 class GameStore {
   constructor() {
   }
+
+  get gameType() { return state.gameType }
+  set gameType(v) { state.gameType = v }
 
   get playerCount() { return state.playerCount }
   set playerCount(v) { state.playerCount = v }

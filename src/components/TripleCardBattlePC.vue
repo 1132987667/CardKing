@@ -433,7 +433,7 @@ import gameStore from '../store/gameStore.js'
 import AIPlayer from '../utils/AIPlayer.js'
 
 export default {
-  name: 'GameMain',
+  name: 'TripleCardBattlePC',
   setup() {
     const selectedCardIndex = ref(null)
     const draggingIndex = ref(null)
