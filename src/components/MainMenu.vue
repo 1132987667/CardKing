@@ -9,9 +9,17 @@
       <nav>
         <ul class="toc-list">
           <li>
-            <a href="#" class="toc-item" @click.prevent="startBluffGame">
+            <a href="#" class="toc-item" @click.prevent="startBankGame">
               <div class="toc-content">
                 <span class="game-index">01</span>
+                <span class="game-title">扑克抢银行</span>
+              </div>
+            </a>
+          </li>
+          <li>
+            <a href="#" class="toc-item" @click.prevent="startBluffGame">
+              <div class="toc-content">
+                <span class="game-index">02</span>
                 <span class="game-title">吹牛皮</span>
               </div>
             </a>
@@ -19,7 +27,7 @@
           <li>
             <a href="#" class="toc-item" @click.prevent="startTripleCardGame">
               <div class="toc-content">
-                <span class="game-index">02</span>
+                <span class="game-index">03</span>
                 <span class="game-title">三卡对决</span>
               </div>
             </a>
@@ -27,7 +35,7 @@
           <li>
             <a href="#" class="toc-item" @click.prevent="startSetGame">
               <div class="toc-content">
-                <span class="game-index">03</span>
+                <span class="game-index">04</span>
                 <span class="game-title">形色牌</span>
               </div>
             </a>
@@ -35,7 +43,7 @@
           <li>
             <a href="#" class="toc-item" @click.prevent="showSettings = true">
               <div class="toc-content">
-                <span class="game-index">04</span>
+                <span class="game-index">05</span>
                 <span class="game-title">游戏设置</span>
               </div>
             </a>
@@ -43,7 +51,7 @@
           <li>
             <a href="#" class="toc-item" @click.prevent="showRules = true">
               <div class="toc-content">
-                <span class="game-index">05</span>
+                <span class="game-index">06</span>
                 <span class="game-title">规则说明</span>
               </div>
             </a>
@@ -160,6 +168,7 @@ import { ref } from 'vue'
 import gameStore from '../store/gameStore.js'
 import setGameStore from '../store/setGameStore.js'
 import bluffStore from '../store/bluffGameStore.js'
+import bankGameStore from '../store/bankGameStore.js'
 
 export default {
   name: 'MainMenu',
@@ -168,6 +177,11 @@ export default {
     const roundCount = ref(5)
     const showSettings = ref(false)
     const showRules = ref(false)
+
+    const startBankGame = () => {
+      // 默认2人游戏，可以在游戏内设置
+      bankGameStore.initGame(2)
+    }
 
     const startBluffGame = () => {
       bluffStore.initGame()
@@ -188,6 +202,7 @@ export default {
       roundCount,
       showSettings,
       showRules,
+      startBankGame,
       startBluffGame,
       startTripleCardGame,
       startSetGame

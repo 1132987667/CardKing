@@ -1,10 +1,13 @@
 <template>
   <div id="app" :class="{ 'is-mobile': isMobile, 'is-desktop': !isMobile }">
+    <!-- 扑克抢银行游戏 -->
+    <BankGameMobile v-if="bankStore.gamePhase !== 'menu' && isMobile" @back-to-menu="handleBackToMenu" />
+    <BankGamePC v-else-if="bankStore.gamePhase !== 'menu' && !isMobile" @back-to-menu="handleBackToMenu" />
     <!-- 吹牛皮游戏 -->
-    <BluffGameMobile v-if="bluffStore.gamePhase !== 'menu' && isMobile" @back-to-menu="handleBackToMenu" />
+    <BluffGameMobile v-else-if="bluffStore.gamePhase !== 'menu' && isMobile" @back-to-menu="handleBackToMenu" />
     <BluffGame v-else-if="bluffStore.gamePhase !== 'menu' && !isMobile" @back-to-menu="handleBackToMenu" />
     <!-- 主菜单 -->
-    <MainMenu v-else-if="gameStore.gamePhase === 'menu' && !isSetGameStarted && !isBluffGameStarted" />
+    <MainMenu v-else-if="gameStore.gamePhase === 'menu' && !isSetGameStarted && !isBluffGameStarted && !isBankGameStarted" />
     <!-- 形色牌游戏 -->
     <SetGameMobile v-else-if="isMobile && isSetGameStarted && setStore.gamePhase !== 'gameOver'"
       @back-to-menu="handleBackToMenu" />
@@ -29,9 +32,12 @@ import SetGameMobile from './components/SetGameMobile.vue'
 import ResultDisplay from './components/ResultDisplay.vue'
 import BluffGame from './components/BluffGame.vue'
 import BluffGameMobile from './components/BluffGameMobile.vue'
+import BankGamePC from './components/BankGamePC.vue'
+import BankGameMobile from './components/BankGameMobile.vue'
 import gameStore from './store/gameStore.js'
 import setGameStore from './store/setGameStore.js'
 import bluffStore from './store/bluffGameStore.js'
+import bankGameStore from './store/bankGameStore.js'
 import deviceDetector from './utils/deviceDetector.js'
 
 export default {
@@ -44,14 +50,18 @@ export default {
     SetGameMobile,
     ResultDisplay,
     BluffGame,
-    BluffGameMobile
+    BluffGameMobile,
+    BankGamePC,
+    BankGameMobile
   },
   setup () {
     const isMobile = ref(false)
     const isSetGameStarted = ref(false)
     const isBluffGameStarted = ref(false)
+    const isBankGameStarted = ref(false)
 
     const setStore = setGameStore
+    const bankStore = bankGameStore
     const isSetGame = computed(() => setStore.gamePhase !== 'menu' && setStore.gamePhase !== 'gameOver')
 
     const checkDevice = () => {
@@ -61,9 +71,11 @@ export default {
     const handleBackToMenu = () => {
       isBluffGameStarted.value = false
       isSetGameStarted.value = false
+      isBankGameStarted.value = false
       bluffStore.backToMenu()
       setStore.backToMenu()
       gameStore.backToMenu()
+      bankStore.backToMenu()
     }
 
     onMounted(() => {
@@ -98,13 +110,23 @@ export default {
       }
     })
 
+    watch(() => bankStore.gamePhase, (newPhase) => {
+      if (newPhase === 'playing' || newPhase === 'gameOver') {
+        isBankGameStarted.value = true
+      } else if (newPhase === 'menu') {
+        isBankGameStarted.value = false
+      }
+    })
+
     return {
       gameStore,
       setStore,
       bluffStore,
+      bankStore,
       isMobile,
       isSetGameStarted,
       isBluffGameStarted,
+      isBankGameStarted,
       handleBackToMenu
     }
   }
