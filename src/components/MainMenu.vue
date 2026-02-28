@@ -48,22 +48,6 @@
               </div>
             </a>
           </li>
-          <li>
-            <a href="#" class="toc-item" @click.prevent="showSettings = true">
-              <div class="toc-content">
-                <span class="game-index">06</span>
-                <span class="game-title">游戏设置</span>
-              </div>
-            </a>
-          </li>
-          <li>
-            <a href="#" class="toc-item" @click.prevent="showRules = true">
-              <div class="toc-content">
-                <span class="game-index">06</span>
-                <span class="game-title">规则说明</span>
-              </div>
-            </a>
-          </li>
         </ul>
       </nav>
 
@@ -72,102 +56,6 @@
       </footer>
     </div>
 
-    <div class="rules-modal" v-if="showSettings" @click.self="showSettings = false">
-      <div class="rules-content">
-        <div class="rules-header">
-          <h2>游戏设置</h2>
-          <button class="rules-close" @click="showSettings = false">×</button>
-        </div>
-        <div class="rules-body">
-          <div class="settings-group">
-            <div class="settings-label">
-              <span class="label-dot"></span>
-              电脑玩家数量
-            </div>
-            <div class="slider-wrapper">
-              <input type="range" v-model="cpuCount" min="1" max="3" class="slider" />
-              <div class="slider-marks">
-                <span>1</span><span>2</span><span>3</span>
-              </div>
-            </div>
-            <div class="settings-value">{{ cpuCount }} 人</div>
-          </div>
-
-          <div class="settings-group">
-            <div class="settings-label">
-              <span class="label-dot"></span>
-              游戏轮数
-            </div>
-            <div class="slider-wrapper">
-              <input type="range" v-model="roundCount" min="3" max="7" class="slider" />
-              <div class="slider-marks">
-                <span>3</span><span>5</span><span>7</span>
-              </div>
-            </div>
-            <div class="settings-value">{{ roundCount }} 轮</div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="rules-modal" v-if="showRules" @click.self="showRules = false">
-      <div class="rules-content">
-        <div class="rules-header">
-          <h2>游戏规则</h2>
-          <button class="rules-close" @click="showRules = false">×</button>
-        </div>
-        <div class="rules-body">
-          <div class="rules-section">
-            <h3>游戏目标</h3>
-            <p>在可配置的轮次（默认5轮）结束后，累计积分最高的玩家获胜。玩家需通过合理分配手牌，在三种扑克小游戏（单张比大小、24点和、比三张）的每个小组中争取更高名次，从而最大化总分。</p>
-          </div>
-
-          <div class="rules-section">
-            <h3>玩家配置</h3>
-            <ul>
-              <li>人类玩家：1名</li>
-              <li>电脑对手数量：可配置 1~3 名，即总玩家数可为 2~4 人</li>
-              <li>每轮每位玩家获得 12 张手牌（从一副去掉大小王的 52 张扑克中抽取）</li>
-            </ul>
-          </div>
-
-          <div class="rules-section">
-            <h3>游戏流程（每轮）</h3>
-            <h4>1. 发牌</h4>
-            <p>每轮开始前彻底洗牌，根据当前玩家总数 N，为每位玩家发放 12 张牌。剩余牌（52 - N×12）本轮弃用。</p>
-
-            <h4>2. 分组阶段</h4>
-            <p>玩家将 12 张手牌分成 6 组：</p>
-            <ul>
-              <li>单张（1张×6组）：各放入 1 张牌</li>
-              <li>24点（2张×2组）：各放入 2 张牌</li>
-              <li>比三张（3张×2组）：各放入 3 张牌</li>
-            </ul>
-
-            <h4>3. 确认与结算</h4>
-            <p>玩家确认分组后，各组独立比大小或计算，得出排名并累计积分。</p>
-          </div>
-
-          <div class="rules-section">
-            <h3>积分规则</h3>
-            <p>设有 P 名玩家（P = 2,3,4），每组根据排名分配积分：</p>
-            <ul>
-              <li>第一名获得 P-1 分</li>
-              <li>第二名获得 P-2 分</li>
-              <li>……</li>
-              <li>最后一名 0 分</li>
-            </ul>
-            <p class="rules-highlight">比三张组的得分翻倍（即第一名得 2×(P-1) 分，第二名得 2×(P-2) 分，以此类推）</p>
-            <p>每组独立计分，立即累加到玩家的累计总分中。</p>
-          </div>
-
-          <div class="rules-section">
-            <h3>轮次循环</h3>
-            <p>完成一轮所有 6 组的比较与计分后，若已进行轮数达到设定值，则游戏结束，显示最终排名；否则进入下一轮（重新洗牌、发牌、分组）。</p>
-          </div>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -184,8 +72,6 @@ export default {
   setup () {
     const cpuCount = ref(1)
     const roundCount = ref(5)
-    const showSettings = ref(false)
-    const showRules = ref(false)
 
     const startBankGame = () => {
       // 默认2人游戏，可以在游戏内设置
@@ -213,8 +99,6 @@ export default {
     return {
       cpuCount,
       roundCount,
-      showSettings,
-      showRules,
       startBankGame,
       startBluffGame,
       startTripleCardGame,

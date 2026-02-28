@@ -56,7 +56,6 @@
 
         <div class="controls">
           <button class="btn btn-secondary" @click="resetCamera">重置视角</button>
-          <button class="btn btn-primary" @click="showRules = true">规则</button>
           <button class="btn btn-danger" @click="backToMenu">退出</button>
         </div>
 
@@ -71,15 +70,23 @@
       <div class="start-screen" v-if="gameState.phase === 'MENU'">
         <div class="start-panel">
           <h1>🔮 弹珠大师</h1>
-          <p class="subtitle">挖坑玩法 · 物理弹射</p>
-          <div class="rules-preview">
-            <h3>游戏规则</h3>
-            <ul>
-              <li>资格赛：离第一个坑最近者获得先手</li>
-              <li>按顺序占领3个坑位</li>
-              <li>占领3坑后进入猎人模式，可攻击对手</li>
-              <li>率先进入终点坑者获胜</li>
-            </ul>
+          <p class="subtitle">3D 物理弹射 · 竞技挑战</p>
+          <div class="mission-preview">
+            <h3>作战简报</h3>
+            <div class="mission-grid">
+              <div class="mission-item">
+                <span class="mission-label">玩法流程</span>
+                <span class="mission-value">资格赛 → 占坑推进 → 终点冲刺</span>
+              </div>
+              <div class="mission-item">
+                <span class="mission-label">物理特性</span>
+                <span class="mission-value">摩擦地形 / 玻璃碰撞 / 动量反馈</span>
+              </div>
+              <div class="mission-item">
+                <span class="mission-label">阶段目标</span>
+                <span class="mission-value">抢占 3 个坑位并进入终点坑</span>
+              </div>
+            </div>
           </div>
           <button class="btn btn-start" @click="startGame">开始游戏</button>
         </div>
@@ -101,32 +108,6 @@
         </div>
       </div>
 
-      <div class="rules-modal" v-if="showRules" @click.self="showRules = false">
-        <div class="rules-content">
-          <div class="rules-header">
-            <h2>游戏规则</h2>
-            <button class="rules-close" @click="showRules = false">×</button>
-          </div>
-          <div class="rules-body">
-            <div class="rules-section">
-              <h3>🎯 游戏目标</h3>
-              <p>按顺序占领3个坑位，然后进入终点坑获胜。</p>
-            </div>
-            <div class="rules-section">
-              <h3>🎮 操作方式</h3>
-              <p>拖拽弹珠进行弹射，力度越大飞得越远。</p>
-            </div>
-            <div class="rules-section">
-              <h3>🏆 资格赛</h3>
-              <p>开局所有玩家弹射一次，离第一个坑最近者获得先手权。</p>
-            </div>
-            <div class="rules-section">
-              <h3>⚔️ 猎人模式</h3>
-              <p>占领3个坑后进入猎人模式，可以撞击对手使其回到起点！</p>
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
   </div>
 </template>
@@ -161,7 +142,6 @@ export default {
     const gameContainer = ref(null)
     const canvasRef = ref(null)
     const isMobile = ref(false)
-    const showRules = ref(false)
     
     let sceneManager = null
     let physicsManager = null
@@ -620,7 +600,6 @@ export default {
       canvasRef,
       gameState,
       isMobile,
-      showRules,
       currentPlayerName,
       currentPlayerClass,
       winnerName,
@@ -1081,38 +1060,43 @@ export default {
   margin-bottom: 32px;
 }
 
-.rules-preview {
+.mission-preview {
   text-align: left;
-  background: rgba(0, 0, 0, 0.2);
-  padding: 24px;
-  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.22);
+  padding: 22px;
+  border-radius: 14px;
   margin-bottom: 24px;
 }
 
-.rules-preview h3 {
+.mission-preview h3 {
   color: #fff;
-  margin-bottom: 16px;
-  font-size: 1.1rem;
+  margin-bottom: 14px;
+  font-size: 1.05rem;
 }
 
-.rules-preview ul {
-  list-style: none;
-  padding: 0;
-  margin: 0;
+.mission-grid {
+  display: grid;
+  gap: 10px;
 }
 
-.rules-preview li {
-  color: rgba(255, 255, 255, 0.8);
-  padding: 8px 0;
-  padding-left: 24px;
-  position: relative;
+.mission-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.rules-preview li::before {
-  content: '•';
-  position: absolute;
-  left: 8px;
-  color: #667eea;
+.mission-label {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.78rem;
+}
+
+.mission-value {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.95rem;
 }
 
 .winner-display {
@@ -1148,88 +1132,6 @@ export default {
   display: flex;
   gap: 16px;
   justify-content: center;
-}
-
-.rules-modal {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: rgba(0, 0, 0, 0.8);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 200;
-}
-
-.rules-content {
-  background: #1a1a2e;
-  border-radius: 16px;
-  max-width: 500px;
-  width: 90%;
-  max-height: 80vh;
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.rules-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 20px 24px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.rules-header h2 {
-  color: #fff;
-  margin: 0;
-  font-size: 1.3rem;
-}
-
-.rules-close {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.1);
-  border: none;
-  color: #fff;
-  font-size: 1.5rem;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s;
-}
-
-.rules-close:hover {
-  background: rgba(255, 255, 255, 0.2);
-}
-
-.rules-body {
-  padding: 24px;
-  overflow-y: auto;
-  max-height: 60vh;
-}
-
-.rules-section {
-  margin-bottom: 24px;
-}
-
-.rules-section:last-child {
-  margin-bottom: 0;
-}
-
-.rules-section h3 {
-  color: #667eea;
-  font-size: 1rem;
-  margin-bottom: 8px;
-}
-
-.rules-section p {
-  color: rgba(255, 255, 255, 0.8);
-  line-height: 1.6;
-  margin: 0;
 }
 
 @media (max-width: 768px) {
