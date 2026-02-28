@@ -57,9 +57,17 @@
             </a>
           </li>
           <li>
+            <a href="#" class="toc-item" @click.prevent="startMemoryGame">
+              <div class="toc-content">
+                <span class="game-index">07</span>
+                <span class="game-title">记忆卡片</span>
+              </div>
+            </a>
+          </li>
+          <li>
             <a href="#" class="toc-item" @click.prevent="showRules = true">
               <div class="toc-content">
-                <span class="game-index">06</span>
+                <span class="game-index">08</span>
                 <span class="game-title">规则说明</span>
               </div>
             </a>
@@ -178,6 +186,7 @@ import setGameStore from '../store/setGameStore.js'
 import bluffStore from '../store/bluffGameStore.js'
 import bankGameStore from '../store/bankGameStore.js'
 import marbleGameStore from '../store/marbleGameStore.js'
+import memoryCardStore from '../store/memoryCardStore.js'
 
 export default {
   name: 'MainMenu',
@@ -210,6 +219,10 @@ export default {
       marbleGameStore.startGame()
     }
 
+    const startMemoryGame = () => {
+      memoryCardStore.startGame()
+    }
+
     return {
       cpuCount,
       roundCount,
@@ -219,7 +232,8 @@ export default {
       startBluffGame,
       startTripleCardGame,
       startSetGame,
-      startMarbleGame
+      startMarbleGame,
+      startMemoryGame
     }
   }
 }
