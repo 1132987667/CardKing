@@ -67,6 +67,8 @@ export default {
     const cards = ref([])
     const selectedIds = ref([])
     const lockBoard = ref(false)
+    const gameVersion = ref(0)
+    const pendingTimerIds = new Set()
 
     const levelOptions = [
       { text: '低', code: 'easy', value: 20 },
@@ -76,12 +78,29 @@ export default {
 
     const pairCount = computed(() => levelOptions[level.value].value / 2)
 
+    const clearPendingTimers = () => {
+      pendingTimerIds.forEach(timerId => clearTimeout(timerId))
+      pendingTimerIds.clear()
+    }
+
+    const scheduleBoardUpdate = (delay, callback) => {
+      const currentVersion = gameVersion.value
+      const timerId = setTimeout(() => {
+        pendingTimerIds.delete(timerId)
+        if (currentVersion !== gameVersion.value) return
+        callback()
+      }, delay)
+      pendingTimerIds.add(timerId)
+    }
+
     const shuffle = (array) => array
       .map(item => ({ item, sort: Math.random() }))
       .sort((a, b) => a.sort - b.sort)
       .map(({ item }) => item)
 
     const initCards = () => {
+      gameVersion.value += 1
+      clearPendingTimers()
       const base = Array.from({ length: pairCount.value }, (_, idx) => CARD_TEXT[idx])
       const doubled = shuffle([...base, ...base])
       cards.value = doubled.map((text, index) => ({
@@ -108,7 +127,7 @@ export default {
 
         if (firstCard.text === secondCard.text) {
           lockBoard.value = true
-          setTimeout(() => {
+          scheduleBoardUpdate(450, () => {
             firstCard.found = true
             secondCard.found = true
             firstCard.flipped = false
@@ -119,17 +138,17 @@ export default {
             if (cards.value.every(card => card.found)) {
               status.value = 'end'
             }
-          }, 450)
+          })
           return
         }
 
         lockBoard.value = true
-        setTimeout(() => {
+        scheduleBoardUpdate(650, () => {
           firstCard.flipped = false
           secondCard.flipped = false
           selectedIds.value = []
           lockBoard.value = false
-        }, 650)
+        })
       }
     }
 
@@ -148,9 +167,12 @@ export default {
     }
 
     const backToMenu = () => {
+      gameVersion.value += 1
+      clearPendingTimers()
       status.value = 'ready'
       cards.value = []
       selectedIds.value = []
+      lockBoard.value = false
       memoryCardStore.backToMenu()
       emit('back-to-menu')
     }
