@@ -10,8 +10,10 @@
     <BluffGame v-else-if="bluffStore.gamePhase !== 'menu' && !isMobile" @back-to-menu="handleBackToMenu" />
     <!-- 记忆卡片游戏 -->
     <MemoryCardGame v-else-if="memoryStore.gamePhase === 'playing'" @back-to-menu="handleBackToMenu" />
+    <!-- 三维方块收集器 -->
+    <CubeCollectorGame v-else-if="cubeCollectorStore.gamePhase === 'playing'" @back-to-menu="handleBackToMenu" />
     <!-- 主菜单 -->
-    <MainMenu v-else-if="gameStore.gamePhase === 'menu' && !isSetGameStarted && !isBluffGameStarted && !isBankGameStarted && marbleStore.gamePhase === 'menu' && memoryStore.gamePhase === 'menu'" />
+    <MainMenu v-else-if="gameStore.gamePhase === 'menu' && !isSetGameStarted && !isBluffGameStarted && !isBankGameStarted && marbleStore.gamePhase === 'menu' && memoryStore.gamePhase === 'menu' && cubeCollectorStore.gamePhase === 'menu'" />
     <!-- 形色牌游戏 -->
     <SetGameMobile v-else-if="isMobile && isSetGameStarted && setStore.gamePhase !== 'gameOver'"
       @back-to-menu="handleBackToMenu" />
@@ -40,12 +42,14 @@ import BankGamePC from './components/BankGamePC.vue'
 import BankGameMobile from './components/BankGameMobile.vue'
 import MarbleGame from './components/MarbleGame.vue'
 import MemoryCardGame from './components/MemoryCardGame.vue'
+import CubeCollectorGame from './components/CubeCollectorGame.vue'
 import gameStore from './store/gameStore.js'
 import setGameStore from './store/setGameStore.js'
 import bluffStore from './store/bluffGameStore.js'
 import bankGameStore from './store/bankGameStore.js'
 import marbleGameStore from './store/marbleGameStore.js'
 import memoryCardStore from './store/memoryCardStore.js'
+import cubeCollectorStore from './store/cubeCollectorStore.js'
 import deviceDetector from './utils/deviceDetector.js'
 
 export default {
@@ -62,7 +66,8 @@ export default {
     BankGamePC,
     BankGameMobile,
     MarbleGame,
-    MemoryCardGame
+    MemoryCardGame,
+    CubeCollectorGame
   },
   setup () {
     const isMobile = ref(false)
@@ -88,6 +93,7 @@ export default {
       bankStore.backToMenu()
       marbleGameStore.backToMenu()
       memoryCardStore.backToMenu()
+      cubeCollectorStore.backToMenu()
     }
 
     onMounted(() => {
@@ -137,6 +143,7 @@ export default {
       bankStore,
       marbleStore: marbleGameStore,
       memoryStore: memoryCardStore,
+      cubeCollectorStore,
       isMobile,
       isSetGameStarted,
       isBluffGameStarted,

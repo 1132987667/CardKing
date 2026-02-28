@@ -48,7 +48,15 @@
               </div>
             </a>
           </li>
-		  <li>
+          <li>
+            <a href="#" class="toc-item" @click.prevent="startCubeCollectorGame">
+              <div class="toc-content">
+                <span class="game-index">06</span>
+                <span class="game-title">三维方块收集器</span>
+              </div>
+            </a>
+          </li>
+          <li>
             <a href="#" class="toc-item" @click.prevent="startMemoryGame">
               <div class="toc-content">
                 <span class="game-index">07</span>
@@ -75,6 +83,7 @@ import bluffStore from '../store/bluffGameStore.js'
 import bankGameStore from '../store/bankGameStore.js'
 import marbleGameStore from '../store/marbleGameStore.js'
 import memoryCardStore from '../store/memoryCardStore.js'
+import cubeCollectorStore from '../store/cubeCollectorStore.js'
 
 export default {
   name: 'MainMenu',
@@ -105,6 +114,10 @@ export default {
       marbleGameStore.startGame()
     }
 
+    const startCubeCollectorGame = () => {
+      cubeCollectorStore.startGame()
+    }
+
     const startMemoryGame = () => {
       memoryCardStore.startGame()
     }
@@ -117,6 +130,7 @@ export default {
       startTripleCardGame,
       startSetGame,
       startMarbleGame,
+      startCubeCollectorGame,
       startMemoryGame
     }
   }
