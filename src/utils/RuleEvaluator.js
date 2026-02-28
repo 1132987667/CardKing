@@ -120,20 +120,20 @@ class RuleEvaluator {
     let pairRank, kicker, kickerSuit, pairSuit1, pairSuit2
     
     if (ranks[0] === ranks[1] && ranks[1] === ranks[2]) {
-      pairRank = ranks[0].rankValue || parseInt(ranks[0])
+      pairRank = cards[0].rankValue
       kicker = 0
       kickerSuit = 0
       pairSuit1 = suitValues[0]
       pairSuit2 = suitValues[1]
     } else if (ranks[0] === ranks[1]) {
-      pairRank = ranks[0].rankValue || parseInt(ranks[0])
-      kicker = ranks[2].rankValue || parseInt(ranks[2])
+      pairRank = cards[0].rankValue
+      kicker = cards[2].rankValue
       kickerSuit = suitValues[2]
       pairSuit1 = suitValues[0]
       pairSuit2 = suitValues[1]
     } else {
-      pairRank = ranks[1].rankValue || parseInt(ranks[1])
-      kicker = ranks[0].rankValue || parseInt(ranks[0])
+      pairRank = cards[1].rankValue
+      kicker = cards[0].rankValue
       kickerSuit = suitValues[0]
       pairSuit1 = suitValues[1]
       pairSuit2 = suitValues[2]
@@ -157,7 +157,7 @@ class RuleEvaluator {
   }
 
   /**
-   * 比较两组三张牌牌型大小（按规格说明书完整实现）
+   * 比较两组三张牌型大小（按规格说明书完整实现）
    * @param {import('./Card.js').default} card1a 第一组第一张牌
    * @param {import('./Card.js').default} card1b 第一组第二张牌
    * @param {import('./Card.js').default} card1c 第一组第三张牌

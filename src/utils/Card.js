@@ -6,7 +6,7 @@ import { Suit, SUIT_PRIORITY, SUIT_NAMES, RANK_PRIORITY, RANK_NAMES } from './co
  */
 class Card {
   /**
-   * @param {string} rank 点数 (2-10, J, Q, K, A)
+   * @param {string} rank 点数 (2-10, J, Q, K, A, JOKER)
    * @param {string} suit 花色
    */
   constructor(rank, suit) {
