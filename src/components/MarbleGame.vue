@@ -187,116 +187,85 @@ export default {
     })
 
     const initGame = () => {
-      console.log('=== initGame 开始 ===')
-      console.log('gameContainer:', gameContainer.value)
-      console.log('container尺寸:', gameContainer.value?.clientWidth, gameContainer.value?.clientHeight)
-      
       isMobile.value = deviceDetector.isMobile()
-      
-      sceneManager = new SceneManager(gameContainer.value)
-      console.log('sceneManager 初始化完成')
-      console.log('scene:', sceneManager.scene)
-      console.log('camera:', sceneManager.camera)
-      console.log('renderer:', sceneManager.renderer)
-      
+
+      sceneManager = new SceneManager(gameContainer.value, canvasRef.value)
       physicsManager = new PhysicsManager()
-      console.log('physicsManager 初始化完成')
-      
+
       createLevel()
       createBalls()
-      
-      console.log('创建输入管理器')
+
       inputManager = new InputManager(
         gameContainer.value,
         sceneManager.camera,
         sceneManager.scene
       )
-      
+
       setupInputHandlers()
       setupPhysicsCallbacks()
-      
+
       aiPlayer = new AIPlayer(gameState, physicsManager)
-      
-      console.log('启动游戏循环')
+
       gameLoop = useRafFn(() => {
         update()
       })
-      
-      // 立即渲染一帧测试
-      try {
-        sceneManager.render()
-        console.log('立即渲染一帧')
-      } catch (e) {
-        console.error('渲染出错:', e)
-      }
-      
-      // 备用渲染定时器
-      window.backupRenderInterval = setInterval(() => {
-        if (sceneManager && sceneManager.render) {
-          sceneManager.render()
-        }
-      }, 100)
-      
-      console.log('=== initGame 完成 ===')
+
+      sceneManager.render()
     }
 
     const createLevel = () => {
-      console.log('=== createLevel 开始 ===')
       const width = 30
       const depth = 40
-      
-      // 添加测试立方体
-      const testCube = new THREE.Mesh(
-        new THREE.BoxGeometry(2, 2, 2),
-        new THREE.MeshStandardMaterial({ color: 0xff0000 })
-      )
-      testCube.position.set(0, 2, 0)
-      testCube.castShadow = true
-      sceneManager.scene.add(testCube)
-      console.log('测试立方体已添加')
-      
-      // 简化：先不使用高度图，确保基本功能正常
-      const ground = sceneManager.createGround(width, depth, null)
-      console.log('地面创建:', ground)
+
+      sceneManager.createGround(width, depth, null)
       physicsManager.createGround(width, depth, null)
-      
-      console.log('坑位数据:', gameState.holes)
+
       gameState.holes.forEach(hole => {
         const holeMesh = sceneManager.createHole(hole.x, hole.z, hole.radius)
-        console.log('坑创建:', hole.id, holeMesh)
         holeMeshes.set(hole.id, holeMesh)
-        
+
         physicsManager.createHoleTrigger(
           hole.x, hole.z, hole.radius,
           hole.id, hole.isFinish
         )
       })
-      console.log('=== createLevel 完成 ===')
+
+      const referenceCube = new THREE.Mesh(
+        new THREE.BoxGeometry(1.5, 1.5, 1.5),
+        new THREE.MeshStandardMaterial({ color: 0x22c55e })
+      )
+      referenceCube.position.set(-6, 0.75, -6)
+      referenceCube.castShadow = true
+      sceneManager.scene.add(referenceCube)
+
+      const referenceSphere = new THREE.Mesh(
+        new THREE.SphereGeometry(0.9, 24, 24),
+        new THREE.MeshStandardMaterial({ color: 0x3b82f6 })
+      )
+      referenceSphere.position.set(6, 0.9, -6)
+      referenceSphere.castShadow = true
+      sceneManager.scene.add(referenceSphere)
     }
 
     const createBalls = () => {
-      console.log('=== createBalls 开始 ===')
       gameState.players.forEach((player, index) => {
         const xOffset = (index === 0) ? -2 : 2
         const position = { x: xOffset, y: 1, z: 5 }
-        
-        console.log('创建球:', player.name, '位置:', position)
+
         const ballMesh = sceneManager.createBall(
           0.4,
           player.color,
           new THREE.Vector3(position.x, position.y, position.z)
         )
-        console.log('球Mesh:', ballMesh, '位置:', ballMesh?.position)
         ballMeshes.set(player.id, ballMesh)
-        
-        const ballBody = physicsManager.createBall(
+
+        physicsManager.createBall(
           0.4,
           position,
           player.id,
           player.color
         )
       })
-      console.log('=== createBalls 完成 ===')
     }
 
     const setupInputHandlers = () => {
@@ -482,21 +451,11 @@ export default {
       }
     }
 
-    let frameCount = 0
-    
     const update = () => {
-      frameCount++
-      if (frameCount % 60 === 0) {
-        console.log('update运行中，帧:', frameCount, 
-          '球位置:', ballMeshes.get(0)?.position,
-          '球位置:', ballMeshes.get(1)?.position)
-      }
-      
       const dt = 1 / 60
-      
+
       physicsManager.step(dt)
-      
-      // 调试：检查球的位置
+
       ballMeshes.forEach((mesh, playerId) => {
         const body = physicsManager.bodies.balls.find(b => b.playerId === playerId)
         if (body && mesh) {
@@ -568,16 +527,6 @@ export default {
     }
 
     onMounted(() => {
-      // 添加全局错误处理
-      window.onerror = function(msg, url, lineNo, columnNo, error) {
-        console.error('全局错误:', msg, '行:', lineNo, '列:', columnNo, error)
-        return false
-      }
-      
-      window.onunhandledrejection = function(event) {
-        console.error('未处理的Promise拒绝:', event.reason)
-      }
-      
       nextTick(() => {
         setTimeout(() => {
           initGame()
@@ -590,9 +539,6 @@ export default {
       if (inputManager) inputManager.dispose()
       if (sceneManager) sceneManager.dispose()
       if (physicsManager) physicsManager.dispose()
-      if (window.backupRenderInterval) {
-        clearInterval(window.backupRenderInterval)
-      }
     })
 
     return {
