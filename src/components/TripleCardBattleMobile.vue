@@ -4,7 +4,7 @@
       <div class="header-top">
         <div class="logo">
           <span class="logo-icon">◈</span>
-          <span class="logo-text">三卡对决</span>
+          <span class="logo-text">田忌赛马</span>
         </div>
         <div class="header-actions">
           <button class="rules-btn home-btn" @click="backToMenu">
@@ -291,6 +291,68 @@
         </div>
       </div>
     </div>
+
+    <!-- 游戏结束统计弹窗 -->
+    <div class="rules-modal" v-if="gameStore.gamePhase === 'gameOver'" @click.self="closeGameOver">
+      <div class="rules-content game-over-content">
+        <div class="rules-header">
+          <h2>游戏结束</h2>
+        </div>
+        <div class="rules-body">
+          <!-- 最终排名 -->
+          <div class="final-ranking">
+            <h3>最终排名</h3>
+            <div class="ranking-list">
+              <div v-for="(player, index) in finalRankings" :key="player.id" 
+                   class="ranking-item" :class="{ 'is-player': !player.isAI, 'is-winner': index === 0 }">
+                <span class="rank">第{{ index + 1 }}名</span>
+                <span class="name">{{ player.name }}</span>
+                <span class="score">{{ gameStore.totalScores[player.id] }}分</span>
+              </div>
+            </div>
+          </div>
+          
+          <!-- 个人统计 -->
+          <div class="personal-stats">
+            <h3>本局战绩</h3>
+            <div class="stats-grid">
+              <div class="stat-box">
+                <span class="stat-num">{{ gameStore.gameStats.firstPlaceCount }}</span>
+                <span class="stat-label">获得第一</span>
+              </div>
+              <div class="stat-box highlight">
+                <span class="stat-num">{{ gameStore.gameStats.tripleFirstCount }}</span>
+                <span class="stat-label">三项全胜</span>
+              </div>
+            </div>
+          </div>
+          
+          <!-- 每轮记录 -->
+          <div class="round-records" v-if="gameStore.gameStats.roundRecords.length > 0">
+            <h3>每轮详情</h3>
+            <div class="records-list">
+              <div v-for="record in gameStore.gameStats.roundRecords" :key="record.round" 
+                   class="record-item" :class="{ 'is-first': record.isFirstPlace, 'is-triple': record.isTripleFirst }">
+                <div class="record-main">
+                  <span class="round-num">第{{ record.round }}轮</span>
+                  <span class="record-score">{{ record.totalScore }}分</span>
+                  <span class="record-badge" v-if="record.isTripleFirst">三冠</span>
+                  <span class="record-badge first" v-else-if="record.isFirstPlace">第一</span>
+                </div>
+                <div class="record-detail">
+                  <span>单张:{{ record.scores.single }}</span>
+                  <span>24点:{{ record.scores.twentyFourPoint }}</span>
+                  <span>比三张:{{ record.scores.threeCard }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="settings-footer">
+          <button class="btn-confirm" @click="closeGameOver">返回主菜单</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -318,6 +380,17 @@ export default {
       gameStore.initGame(Number(settingsCpuCount.value) + 1, Number(settingsRoundCount.value))
       gameStore.startNewRound()
       showSettings.value = false
+    }
+
+    // 最终排名
+    const finalRankings = computed(() => {
+      return [...gameStore.players].sort((a, b) =>
+        gameStore.totalScores[b.id] - gameStore.totalScores[a.id]
+      )
+    })
+
+    const closeGameOver = () => {
+      emit('back-to-menu')
     }
 
     const zoneTabs = [
@@ -670,6 +743,8 @@ export default {
       confirmGroup,
       handleNext,
       confirmSettings,
+      closeGameOver,
+      finalRankings,
       backToMenu: () => emit('back-to-menu')
     }
   }
@@ -1494,6 +1569,178 @@ export default {
 .btn-confirm:hover {
   background: #d4b78d;
   box-shadow: 0 0 15px rgba(196, 167, 125, 0.35);
+}
+
+/* 游戏结束弹窗样式 */
+.game-over-content {
+  max-width: 400px;
+  max-height: 80vh;
+}
+
+.final-ranking {
+  margin-bottom: 16px;
+}
+
+.final-ranking h3,
+.personal-stats h3,
+.round-records h3 {
+  margin: 0 0 10px 0;
+  font-size: 14px;
+  color: #c4a77d;
+  font-weight: 600;
+}
+
+.ranking-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ranking-item {
+  display: flex;
+  align-items: center;
+  padding: 10px 12px;
+  background: rgba(60, 57, 54, 0.5);
+  border: 1px solid rgba(180, 170, 160, 0.12);
+  border-radius: 6px;
+}
+
+.ranking-item.is-player {
+  border-color: rgba(196, 167, 125, 0.4);
+  background: rgba(196, 167, 125, 0.1);
+}
+
+.ranking-item.is-winner {
+  background: rgba(196, 167, 125, 0.2);
+  border-color: rgba(196, 167, 125, 0.6);
+}
+
+.ranking-item .rank {
+  width: 50px;
+  font-size: 12px;
+  color: rgba(180, 170, 160, 0.8);
+}
+
+.ranking-item.is-winner .rank {
+  color: #c4a77d;
+  font-weight: 600;
+}
+
+.ranking-item .name {
+  flex: 1;
+  font-size: 14px;
+  color: rgba(245, 240, 230, 0.95);
+}
+
+.ranking-item .score {
+  font-size: 16px;
+  font-weight: 600;
+  color: #c4a77d;
+}
+
+.personal-stats {
+  margin-bottom: 16px;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.stat-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px;
+  background: rgba(60, 57, 54, 0.5);
+  border: 1px solid rgba(180, 170, 160, 0.12);
+  border-radius: 6px;
+}
+
+.stat-box.highlight {
+  background: rgba(196, 167, 125, 0.15);
+  border-color: rgba(196, 167, 125, 0.4);
+}
+
+.stat-box .stat-num {
+  font-size: 28px;
+  font-weight: 600;
+  color: #c4a77d;
+}
+
+.stat-box .stat-label {
+  font-size: 12px;
+  color: rgba(180, 170, 160, 0.7);
+  margin-top: 4px;
+}
+
+.round-records {
+  margin-bottom: 12px;
+}
+
+.records-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.record-item {
+  padding: 10px;
+  background: rgba(60, 57, 54, 0.3);
+  border-radius: 6px;
+  border: 1px solid transparent;
+}
+
+.record-item.is-first {
+  background: rgba(196, 167, 125, 0.1);
+}
+
+.record-item.is-triple {
+  background: rgba(196, 167, 125, 0.2);
+  border-color: rgba(196, 167, 125, 0.3);
+}
+
+.record-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.record-main .round-num {
+  font-size: 13px;
+  color: rgba(180, 170, 160, 0.8);
+}
+
+.record-main .record-score {
+  font-size: 15px;
+  font-weight: 600;
+  color: #c4a77d;
+  flex: 1;
+}
+
+.record-main .record-badge {
+  padding: 2px 6px;
+  background: rgba(184, 138, 111, 0.4);
+  border-radius: 4px;
+  font-size: 10px;
+  color: #f5f0e6;
+  font-weight: 600;
+}
+
+.record-main .record-badge.first {
+  background: rgba(196, 167, 125, 0.3);
+  color: #c4a77d;
+}
+
+.record-detail {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+  color: rgba(180, 170, 160, 0.6);
 }
 
 .mobile-game.is-landscape .mobile-hand {

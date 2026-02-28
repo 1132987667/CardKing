@@ -649,7 +649,10 @@ export default {
 
 .board {
   width: 100%;
-  height: 100%;
+  max-width: 900px;
+  height: auto;
+  max-height: 70vh;
+  aspect-ratio: 4 / 3;
   display: flex;
   align-items: center;
   justify-content: center;

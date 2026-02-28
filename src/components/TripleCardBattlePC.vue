@@ -5,7 +5,7 @@
       <div class="header-left">
         <div class="logo">
           <span class="logo-icon">◈</span>
-          <span class="logo-text">三卡对决</span>
+          <span class="logo-text">田忌赛马</span>
         </div>
         <button class="rules-btn" @click="showRules = true">
           <span class="rules-icon">?</span>
@@ -428,6 +428,75 @@
         </div>
       </div>
     </div>
+
+    <!-- 游戏结束统计弹窗 -->
+    <div class="rules-modal" v-if="gameStore.gamePhase === 'gameOver'" @click.self="closeGameOver">
+      <div class="rules-content game-over-content">
+        <div class="rules-header">
+          <h2>游戏结束</h2>
+        </div>
+        <div class="rules-body">
+          <!-- 最终排名 -->
+          <div class="final-ranking">
+            <h3>最终排名</h3>
+            <div class="ranking-list">
+              <div v-for="(player, index) in finalRankings" :key="player.id" 
+                   class="ranking-item" :class="{ 'is-player': !player.isAI, 'is-winner': index === 0 }">
+                <span class="rank">第{{ index + 1 }}名</span>
+                <span class="name">{{ player.name }}</span>
+                <span class="score">{{ gameStore.totalScores[player.id] }}分</span>
+              </div>
+            </div>
+          </div>
+          
+          <!-- 个人统计 -->
+          <div class="personal-stats">
+            <h3>本局战绩</h3>
+            <div class="stats-grid">
+              <div class="stat-box">
+                <span class="stat-num">{{ gameStore.gameStats.firstPlaceCount }}</span>
+                <span class="stat-label">获得第一</span>
+              </div>
+              <div class="stat-box highlight">
+                <span class="stat-num">{{ gameStore.gameStats.tripleFirstCount }}</span>
+                <span class="stat-label">三项全胜</span>
+              </div>
+            </div>
+          </div>
+          
+          <!-- 每轮记录 -->
+          <div class="round-records" v-if="gameStore.gameStats.roundRecords.length > 0">
+            <h3>每轮详情</h3>
+            <div class="records-table">
+              <div class="record-header">
+                <span>轮次</span>
+                <span>单张</span>
+                <span>24点</span>
+                <span>比三张</span>
+                <span>总分</span>
+                <span>排名</span>
+              </div>
+              <div v-for="record in gameStore.gameStats.roundRecords" :key="record.round" 
+                   class="record-row" :class="{ 'is-first': record.isFirstPlace, 'is-triple': record.isTripleFirst }">
+                <span>第{{ record.round }}轮</span>
+                <span>{{ record.scores.single }}</span>
+                <span>{{ record.scores.twentyFourPoint }}</span>
+                <span>{{ record.scores.threeCard }}</span>
+                <span class="total">{{ record.totalScore }}</span>
+                <span class="badge">
+                  <span v-if="record.isTripleFirst" class="triple-badge">三冠</span>
+                  <span v-else-if="record.isFirstPlace" class="first-badge">第一</span>
+                  <span v-else>-</span>
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="settings-footer">
+          <button class="btn-confirm" @click="closeGameOver">返回主菜单</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -475,6 +544,13 @@ export default {
 
     const sortModeText = computed(() => {
       return sortMode.value === 'rank' ? '先点数后花色' : '先花色后点数'
+    })
+
+    // 最终排名
+    const finalRankings = computed(() => {
+      return [...gameStore.players].sort((a, b) =>
+        gameStore.totalScores[b.id] - gameStore.totalScores[a.id]
+      )
     })
 
     const gameLogs = ref([
@@ -769,6 +845,10 @@ export default {
       }
     }
 
+    const closeGameOver = () => {
+      emit('back-to-menu')
+    }
+
     return {
       gameStore,
       playerHand,
@@ -805,6 +885,8 @@ export default {
       toggleSort,
       confirmGroup,
       handleNext,
+      closeGameOver,
+      finalRankings,
       backToMenu: () => emit('back-to-menu')
     }
   }
@@ -1709,5 +1791,190 @@ export default {
 .btn-confirm:hover {
   background: #d4b78d;
   box-shadow: 0 0 15px rgba(196, 167, 125, 0.35);
+}
+
+/* 游戏结束弹窗样式 */
+.game-over-content {
+  max-width: 600px;
+}
+
+.final-ranking {
+  margin-bottom: 24px;
+}
+
+.final-ranking h3 {
+  margin: 0 0 12px 0;
+  font-size: 16px;
+  color: #c4a77d;
+  font-weight: 600;
+}
+
+.ranking-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ranking-item {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  background: rgba(60, 57, 54, 0.5);
+  border: 1px solid rgba(180, 170, 160, 0.12);
+  border-radius: 8px;
+}
+
+.ranking-item.is-player {
+  border-color: rgba(196, 167, 125, 0.4);
+  background: rgba(196, 167, 125, 0.1);
+}
+
+.ranking-item.is-winner {
+  background: rgba(196, 167, 125, 0.2);
+  border-color: rgba(196, 167, 125, 0.6);
+}
+
+.ranking-item .rank {
+  width: 60px;
+  font-size: 14px;
+  color: rgba(180, 170, 160, 0.8);
+}
+
+.ranking-item.is-winner .rank {
+  color: #c4a77d;
+  font-weight: 600;
+}
+
+.ranking-item .name {
+  flex: 1;
+  font-size: 15px;
+  color: rgba(245, 240, 230, 0.95);
+}
+
+.ranking-item .score {
+  font-size: 18px;
+  font-weight: 600;
+  color: #c4a77d;
+}
+
+.personal-stats {
+  margin-bottom: 24px;
+}
+
+.personal-stats h3 {
+  margin: 0 0 12px 0;
+  font-size: 16px;
+  color: #c4a77d;
+  font-weight: 600;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.stat-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px;
+  background: rgba(60, 57, 54, 0.5);
+  border: 1px solid rgba(180, 170, 160, 0.12);
+  border-radius: 8px;
+}
+
+.stat-box.highlight {
+  background: rgba(196, 167, 125, 0.15);
+  border-color: rgba(196, 167, 125, 0.4);
+}
+
+.stat-box .stat-num {
+  font-size: 32px;
+  font-weight: 600;
+  color: #c4a77d;
+}
+
+.stat-box .stat-label {
+  font-size: 13px;
+  color: rgba(180, 170, 160, 0.7);
+  margin-top: 4px;
+}
+
+.round-records {
+  margin-bottom: 16px;
+}
+
+.round-records h3 {
+  margin: 0 0 12px 0;
+  font-size: 16px;
+  color: #c4a77d;
+  font-weight: 600;
+}
+
+.records-table {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.record-header {
+  display: grid;
+  grid-template-columns: 60px 50px 50px 60px 50px 60px;
+  gap: 8px;
+  padding: 8px;
+  background: rgba(196, 167, 125, 0.1);
+  border-radius: 6px;
+  font-size: 12px;
+  color: rgba(180, 170, 160, 0.7);
+}
+
+.record-row {
+  display: grid;
+  grid-template-columns: 60px 50px 50px 60px 50px 60px;
+  gap: 8px;
+  padding: 8px;
+  background: rgba(60, 57, 54, 0.3);
+  border-radius: 6px;
+  font-size: 13px;
+  color: rgba(200, 190, 180, 0.85);
+  align-items: center;
+}
+
+.record-row.is-first {
+  background: rgba(196, 167, 125, 0.1);
+}
+
+.record-row.is-triple {
+  background: rgba(196, 167, 125, 0.2);
+  border: 1px solid rgba(196, 167, 125, 0.3);
+}
+
+.record-row .total {
+  font-weight: 600;
+  color: #c4a77d;
+}
+
+.record-row .badge {
+  display: flex;
+  justify-content: center;
+}
+
+.first-badge {
+  padding: 2px 8px;
+  background: rgba(196, 167, 125, 0.3);
+  border-radius: 4px;
+  font-size: 11px;
+  color: #c4a77d;
+  font-weight: 500;
+}
+
+.triple-badge {
+  padding: 2px 8px;
+  background: rgba(184, 138, 111, 0.4);
+  border-radius: 4px;
+  font-size: 11px;
+  color: #f5f0e6;
+  font-weight: 600;
 }
 </style>

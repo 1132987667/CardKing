@@ -7,7 +7,7 @@ import { Suit, RANK_PRIORITY, SUIT_PRIORITY } from '../utils/constants.js'
  */
 const bluffGameStore = reactive({
   // 游戏状态
-  gamePhase: 'menu', // menu, playing, roundResult, gameOver
+  gamePhase: 'menu', // menu, selectDifficulty, playing, roundResult, gameOver
 
   // 玩家列表
   players: [],
@@ -49,6 +49,24 @@ const bluffGameStore = reactive({
   // 游戏设置
   settings: {
     aiDelay: 1000, // AI行动延迟(ms)
+    difficulty: 'medium', // 游戏难度: 'easy' | 'medium' | 'hard'
+  },
+
+  // AI记忆系统（每个AI玩家独立的记忆）
+  aiMemory: {
+    cpu1: null,
+    cpu2: null,
+    cpu3: null,
+  },
+
+  // 游戏记录统计
+  gameStats: {
+    successfulBluffs: 0, // 成功偷跑（吹牛成功）次数
+    failedBluffs: 0, // 吹牛失败次数
+    successfulChallenges: 0, // 质疑成功次数
+    failedChallenges: 0, // 质疑失败次数
+    cardsBluffed: 0, // 成功偷跑的牌数
+    totalRounds: 0, // 总局数
   },
 
   /**
@@ -65,6 +83,23 @@ const bluffGameStore = reactive({
     this.lastPlay = { playerId: null, cardCount: 0, claimedRank: null }
     this.logs = []
     this.selectedCardIndices = []
+
+    // 重置游戏统计
+    this.gameStats = {
+      successfulBluffs: 0,
+      failedBluffs: 0,
+      successfulChallenges: 0,
+      failedChallenges: 0,
+      cardsBluffed: 0,
+      totalRounds: 0,
+    }
+
+    // 重置AI记忆
+    this.aiMemory = {
+      cpu1: null,
+      cpu2: null,
+      cpu3: null,
+    }
 
     // 创建玩家 (1人类 + 3AI)
     this.players = [
@@ -246,6 +281,18 @@ const bluffGameStore = reactive({
     // 重置跳过计数
     this.skipCount = 0
 
+    // 记录是否为吹牛（出的牌不全是宣称的点数）
+    const isBluff = playedCards.some(
+      (card) => card.rank !== claimedRank && card.rank !== 'JOKER',
+    )
+    if (isBluff) {
+      // 临时记录这次吹牛，等待质疑结果
+      this._pendingBluff = {
+        playerId: playerId,
+        cardCount: playedCards.length,
+      }
+    }
+
     this.addLog(`${player.name} 出了 ${playedCards.length} 张 ${claimedRank}`)
 
     // 检查是否获胜
@@ -294,6 +341,12 @@ const bluffGameStore = reactive({
       this.sortHand(challenger.hand)
       challenger.cardCount = challenger.hand.length
       nextPlayerId = lastPlayerId // 最后出牌的人获得出牌权
+      this.gameStats.failedChallenges++
+      // 如果之前有吹牛记录，则吹牛成功
+      if (this._pendingBluff && this._pendingBluff.playerId === lastPlayerId) {
+        this.gameStats.successfulBluffs++
+        this.gameStats.cardsBluffed += this._pendingBluff.cardCount
+      }
       this.addLog(
         `${challenger.name} 质疑失败！收回 ${this.pile.accumulated.length + this.pile.latest.length} 张牌`,
       )
@@ -303,16 +356,24 @@ const bluffGameStore = reactive({
       this.sortHand(lastPlayer.hand)
       lastPlayer.cardCount = lastPlayer.hand.length
       nextPlayerId = challengerId // 质疑者获得出牌权
+      this.gameStats.successfulChallenges++
+      // 如果之前有吹牛记录，则吹牛失败
+      if (this._pendingBluff && this._pendingBluff.playerId === lastPlayerId) {
+        this.gameStats.failedBluffs++
+      }
       this.addLog(
         `${challenger.name} 质疑成功！${lastPlayer.name} 收回 ${this.pile.accumulated.length + this.pile.latest.length} 张牌`,
       )
     }
+    // 清空待处理的吹牛记录
+    this._pendingBluff = null
 
     // 清空牌堆
     this.pile.accumulated = []
     this.pile.latest = []
     this.currentRank = null
     this.skipCount = 0
+    this.gameStats.totalRounds++
     this.lastPlay = { playerId: null, cardCount: 0, claimedRank: null }
 
     // 设置下一轮出牌权
@@ -353,6 +414,10 @@ const bluffGameStore = reactive({
       this.pile.latest = []
       this.currentRank = null
       this.skipCount = 0
+      this.gameStats.totalRounds++
+
+      // 清空待处理的吹牛记录
+      this._pendingBluff = null
 
       // 最后出牌者获得出牌权
       const lastPlayerIndex = this.players.findIndex(
@@ -416,6 +481,93 @@ const bluffGameStore = reactive({
     this.lastPlay = { playerId: null, cardCount: 0, claimedRank: null }
     this.logs = []
     this.selectedCardIndices = []
+  },
+
+  /**
+   * 进入难度选择界面
+   */
+  selectDifficulty() {
+    this.gamePhase = 'selectDifficulty'
+  },
+
+  /**
+   * 设置游戏难度并开始游戏
+   * @param {string} difficulty 难度级别: 'easy' | 'medium' | 'hard'
+   */
+  setDifficulty(difficulty) {
+    this.settings.difficulty = difficulty
+    this.initGame()
+  },
+
+  /**
+   * 更新AI记忆
+   * @param {string} playerId AI玩家ID
+   * @param {Object} event 事件对象
+   */
+  updateAIMemory(playerId, event) {
+    if (!this.aiMemory[playerId]) {
+      this.aiMemory[playerId] = {
+        knownCards: [],
+        discardedCards: [],
+        playedCards: [],
+      }
+    }
+
+    // 根据难度确定记忆准确率
+    let accuracy = 0
+    switch (this.settings.difficulty) {
+      case 'easy':
+        accuracy = 0
+        break
+      case 'medium':
+        accuracy = 0.7
+        break
+      case 'hard':
+        accuracy = 0.9
+        break
+      default:
+        accuracy = 0.7
+    }
+
+    // 如果记忆失败（根据准确率），不记录
+    if (Math.random() > accuracy) {
+      return
+    }
+
+    const memory = this.aiMemory[playerId]
+
+    // 处理不同类型的事件
+    switch (event.type) {
+      case 'play':
+        // 记录玩家出的牌
+        if (event.cards) {
+          memory.playedCards.push(...event.cards)
+        }
+        break
+
+      case 'challenge':
+        // 质疑时，摊开的牌被所有AI看到
+        if (event.revealedCards) {
+          memory.knownCards.push(...event.revealedCards)
+        }
+        break
+
+      case 'discard':
+        // 弃牌时，牌进入弃牌区
+        if (event.cards) {
+          memory.discardedCards.push(...event.cards)
+        }
+        break
+    }
+  },
+
+  /**
+   * 获取AI记忆
+   * @param {string} playerId AI玩家ID
+   * @returns {Object} AI的记忆
+   */
+  getAIMemory(playerId) {
+    return this.aiMemory[playerId] || null
   },
 })
 

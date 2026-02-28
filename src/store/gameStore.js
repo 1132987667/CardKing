@@ -19,7 +19,13 @@ const state = reactive({
   totalScores: {},
   gamePhase: 'menu',
   winner: null,
-  playerHandBackup: []
+  playerHandBackup: [],
+  // 游戏记录统计
+  gameStats: {
+    firstPlaceCount: 0,        // 获得第一名次数
+    tripleFirstCount: 0,       // 三项都第一次数
+    roundRecords: []           // 每轮记录
+  }
 })
 
 class GameStore {
@@ -71,6 +77,9 @@ class GameStore {
   get winner() { return state.winner }
   set winner(v) { state.winner = v }
 
+  get gameStats() { return state.gameStats }
+  set gameStats(v) { state.gameStats = v }
+
   reset() {
     state.playerCount = 2
     state.totalRounds = 5
@@ -88,6 +97,11 @@ class GameStore {
     state.gamePhase = 'menu'
     state.winner = null
     state.playerHandBackup = []
+    state.gameStats = {
+      firstPlaceCount: 0,
+      tripleFirstCount: 0,
+      roundRecords: []
+    }
   }
 
   createDeck() {
@@ -115,10 +129,16 @@ class GameStore {
     this.playerCount = playerCount
     this.totalRounds = totalRounds
     this.currentRound = 0
+    this.subRound = 1
     state.players.length = 0
     state.playerGroups = {}
     state.roundScores = {}
     state.totalScores = {}
+    state.gameStats = {
+      firstPlaceCount: 0,
+      tripleFirstCount: 0,
+      roundRecords: []
+    }
 
     state.players.push({ id: 'player', name: '玩家', isAI: false })
 
@@ -316,9 +336,78 @@ class GameStore {
         const totalScore = (this.tempRoundScores[p.id] || 0) + (this.roundScores[p.id] || 0)
         this.totalScores[p.id] += totalScore
       })
+      
+      // 记录本轮统计（只在第二轮结算时记录）
+      this._recordRoundStats()
     }
 
     this.gamePhase = 'roundResult'
+  }
+  
+  /**
+   * 记录本轮游戏统计
+   */
+  _recordRoundStats() {
+    const playerId = 'player'
+    const roundRecord = {
+      round: this.currentRound,
+      scores: { ...this.groupScores[playerId] },
+      totalScore: 0,
+      isFirstPlace: false,
+      isTripleFirst: false
+    }
+    
+    // 计算本轮总得分
+    roundRecord.totalScore = this.groupScores[playerId].single + 
+                             this.groupScores[playerId].twentyFourPoint + 
+                             this.groupScores[playerId].threeCard
+    
+    // 判断是否为第一名（总得分最高）
+    let maxScore = -1
+    this.players.forEach(p => {
+      const score = this.groupScores[p.id].single + 
+                    this.groupScores[p.id].twentyFourPoint + 
+                    this.groupScores[p.id].threeCard
+      if (score > maxScore) {
+        maxScore = score
+      }
+    })
+    
+    if (roundRecord.totalScore >= maxScore && roundRecord.totalScore > 0) {
+      roundRecord.isFirstPlace = true
+      this.gameStats.firstPlaceCount++
+    }
+    
+    // 判断是否为三项都第一
+    const singleRank = this._getGroupRank(playerId, 'single')
+    const twentyFourRank = this._getGroupRank(playerId, 'twentyFourPoint')
+    const threeCardRank = this._getGroupRank(playerId, 'threeCard')
+    
+    if (singleRank === 1 && twentyFourRank === 1 && threeCardRank === 1) {
+      roundRecord.isTripleFirst = true
+      this.gameStats.tripleFirstCount++
+    }
+    
+    this.gameStats.roundRecords.push(roundRecord)
+  }
+  
+  /**
+   * 获取玩家在某组的排名
+   */
+  _getGroupRank(playerId, groupType) {
+    const playerScore = this.groupScores[playerId]?.[groupType] || 0
+    let rank = 1
+    
+    this.players.forEach(p => {
+      if (p.id !== playerId) {
+        const score = this.groupScores[p.id]?.[groupType] || 0
+        if (score > playerScore) {
+          rank++
+        }
+      }
+    })
+    
+    return rank
   }
 
   isGameOver() {

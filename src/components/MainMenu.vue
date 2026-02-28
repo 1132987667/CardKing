@@ -28,7 +28,7 @@
             <a href="#" class="toc-item" @click.prevent="startTripleCardGame">
               <div class="toc-content">
                 <span class="game-index">03</span>
-                <span class="game-title">三卡对决</span>
+                <span class="game-title">田忌赛马</span>
               </div>
             </a>
           </li>
@@ -97,7 +97,7 @@ export default {
     }
 
     const startBluffGame = () => {
-      bluffStore.initGame()
+      bluffStore.selectDifficulty()
     }
 
     const startTripleCardGame = () => {

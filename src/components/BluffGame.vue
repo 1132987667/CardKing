@@ -1,7 +1,38 @@
 <template>
   <div class="bluff-game">
+    <!-- 难度选择弹窗 -->
+    <div class="difficulty-modal" v-if="bluffStore.gamePhase === 'selectDifficulty'">
+      <div class="difficulty-content">
+        <div class="difficulty-header">
+          <h2>选择游戏难度</h2>
+        </div>
+        <div class="difficulty-body">
+          <div class="difficulty-options">
+            <button class="difficulty-card easy" @click="bluffStore.setDifficulty('easy')">
+              <span class="difficulty-icon">🌱</span>
+              <span class="difficulty-name">简单</span>
+              <span class="difficulty-desc">AI随机出牌，不记牌</span>
+            </button>
+            <button class="difficulty-card medium" @click="bluffStore.setDifficulty('medium')">
+              <span class="difficulty-icon">🌿</span>
+              <span class="difficulty-name">中等</span>
+              <span class="difficulty-desc">AI会简单策略，70%记牌准确率</span>
+            </button>
+            <button class="difficulty-card hard" @click="bluffStore.setDifficulty('hard')">
+              <span class="difficulty-icon">🔥</span>
+              <span class="difficulty-name">困难</span>
+              <span class="difficulty-desc">AI智能策略，90%记牌准确率</span>
+            </button>
+          </div>
+        </div>
+        <div class="difficulty-footer">
+          <button class="btn" @click="backToMenu">返回主菜单</button>
+        </div>
+      </div>
+    </div>
+
     <!-- 顶部区域 -->
-    <header class="header">
+    <header class="header" v-if="bluffStore.gamePhase !== 'selectDifficulty'">
       <div class="header-left">
         <div class="logo">
           <span class="logo-icon">🎴</span>
@@ -74,6 +105,15 @@
             <div class="opponent-avatar">{{ getPlayerInitial(player, index + 1) }}</div>
             <div class="opponent-name">{{ player.name }}</div>
             <div class="opponent-cards">{{ player.cardCount }}张</div>
+            <!-- 自动显示的操作提示 -->
+            <div v-if="playerTooltip[player.id]" class="opponent-tooltip">
+              <div class="tooltip-content">
+                <div v-if="getPlayerLastAction(player.id)" class="tooltip-action">
+                  {{ getPlayerLastAction(player.id) }}
+                </div>
+                <div v-else class="tooltip-no-action">暂无操作</div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -323,6 +363,36 @@
             <span class="winner-icon">🏆</span>
             <span class="winner-name">{{ winnerName }} 获胜!</span>
           </div>
+          <!-- 游戏统计 -->
+          <div class="game-stats">
+            <h3>本局统计</h3>
+            <div class="stats-grid">
+              <div class="stat-item">
+                <span class="stat-label">成功偷跑</span>
+                <span class="stat-value">{{ bluffStore.gameStats.successfulBluffs }}次</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">偷跑牌数</span>
+                <span class="stat-value">{{ bluffStore.gameStats.cardsBluffed }}张</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">质疑成功</span>
+                <span class="stat-value">{{ bluffStore.gameStats.successfulChallenges }}次</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">质疑失败</span>
+                <span class="stat-value">{{ bluffStore.gameStats.failedChallenges }}次</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">吹牛失败</span>
+                <span class="stat-value">{{ bluffStore.gameStats.failedBluffs }}次</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">总局数</span>
+                <span class="stat-value">{{ bluffStore.gameStats.totalRounds }}轮</span>
+              </div>
+            </div>
+          </div>
         </div>
         <div class="gameover-footer">
           <button class="btn" @click="bluffStore.restartGame()">再来一局</button>
@@ -345,7 +415,9 @@ export default {
     const selectedRank = ref(null)
     const isAIThinking = ref(false)
     const challengeResult = ref(null)
+    const playerTooltip = ref({})
     let aiTimer = null
+    let tooltipTimer = null
 
     // 计算属性
     const playerHand = computed(() => {
@@ -524,6 +596,43 @@ export default {
       }
     }
 
+    // 显示玩家悬浮提示
+    const showPlayerTooltip = (playerId) => {
+      if (tooltipTimer) {
+        clearTimeout(tooltipTimer)
+      }
+      playerTooltip.value[playerId] = true
+    }
+
+    // 隐藏玩家悬浮提示
+    const hidePlayerTooltip = () => {
+      playerTooltip.value = {}
+    }
+
+    // 获取玩家最近的操作记录
+    const getPlayerLastAction = (playerId) => {
+      const player = bluffStore.players.find(p => p.id === playerId)
+      if (!player || !player.isAI) return null
+
+      // 从日志中查找该玩家的最近操作
+      const logs = bluffStore.logs
+      for (const log of logs) {
+        if (log.includes(player.name)) {
+          if (log.includes('出了')) {
+            const match = log.match(/出了 (\d+) 张 (.+)/)
+            if (match) {
+              return `出牌 ${match[1]}张${match[2]}`
+            }
+          } else if (log.includes('质疑')) {
+            return log.includes('质疑成功') ? '质疑成功' : '质疑失败'
+          } else if (log.includes('跳过')) {
+            return '跳过'
+          }
+        }
+      }
+      return null
+    }
+
     // AI回合处理
     const handleAITurn = async () => {
       const currentPlayer = bluffStore.getCurrentPlayer()
@@ -531,9 +640,9 @@ export default {
 
       isAIThinking.value = true
 
-      // 延迟执行，模拟思考
+      // 延迟执行，模拟思考（1秒）
       await new Promise(resolve => {
-        aiTimer = setTimeout(resolve, bluffStore.settings.aiDelay)
+        aiTimer = setTimeout(resolve, 1000)
       })
 
       if (bluffStore.gamePhase === 'gameOver') {
@@ -548,22 +657,52 @@ export default {
         players: bluffStore.players
       }
 
-      const decision = BluffAI.makeDecision(currentPlayer, gameState)
+      // 获取当前AI的记忆和难度设置
+      const aiMemory = bluffStore.getAIMemory(currentPlayer.id)
+      const difficulty = bluffStore.settings.difficulty
 
+      const decision = BluffAI.makeDecision(currentPlayer, gameState, aiMemory, difficulty)
+
+      // 先执行操作
       if (decision.type === 'challenge') {
         const result = bluffStore.challenge(currentPlayer.id)
         if (result) {
           challengeResult.value = result
+          // 更新所有AI的记忆（质疑时摊开的牌被所有人看到）
+          bluffStore.players.forEach(p => {
+            if (p.isAI) {
+              bluffStore.updateAIMemory(p.id, {
+                type: 'challenge',
+                revealedCards: result.revealedCards
+              })
+            }
+          })
         }
       } else if (decision.type === 'skip') {
         bluffStore.skip()
       } else {
+        const playedCards = decision.data.cardIndices.map(i => currentPlayer.hand[i])
         bluffStore.playCards(
           currentPlayer.id,
           decision.data.cardIndices,
           decision.data.claimedRank
         )
+        // 更新所有AI的记忆
+        bluffStore.players.forEach(p => {
+          if (p.isAI) {
+            bluffStore.updateAIMemory(p.id, {
+              type: 'play',
+              cards: playedCards
+            })
+          }
+        })
       }
+
+      // 显示操作提示2秒
+      showPlayerTooltip(currentPlayer.id)
+      setTimeout(() => {
+        hidePlayerTooltip()
+      }, 2000)
 
       isAIThinking.value = false
     }
@@ -599,6 +738,7 @@ export default {
       selectedRank,
       isAIThinking,
       challengeResult,
+      playerTooltip,
       playerHand,
       cpuPlayers,
       isPlayerTurn,
@@ -629,7 +769,10 @@ export default {
       handleSkip,
       closeChallengeResult,
       backToMenu,
-      getStackedCardStyle
+      getStackedCardStyle,
+      showPlayerTooltip,
+      hidePlayerTooltip,
+      getPlayerLastAction
     }
   }
 }
@@ -930,6 +1073,41 @@ export default {
 .opponent-cards {
   font-size: 13px;
   color: #c4a77d;
+}
+
+/* 对手悬浮提示 */
+.opponent {
+  position: relative;
+}
+
+.opponent-tooltip {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: 12px;
+  z-index: 100;
+  pointer-events: none;
+}
+
+.opponent-tooltip .tooltip-content {
+  background: rgba(45, 42, 40, 0.95);
+  border: 1px solid rgba(196, 167, 125, 0.4);
+  border-radius: 8px;
+  padding: 10px 16px;
+  white-space: nowrap;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.opponent-tooltip .tooltip-action {
+  font-size: 14px;
+  color: #c4a77d;
+  font-weight: 600;
+}
+
+.opponent-tooltip .tooltip-no-action {
+  font-size: 13px;
+  color: rgba(180, 170, 160, 0.6);
 }
 
 /* 牌堆区域 */
@@ -1355,7 +1533,8 @@ export default {
 /* 弹窗样式 */
 .rules-modal,
 .challenge-modal,
-.gameover-modal {
+.gameover-modal,
+.difficulty-modal {
   position: fixed;
   top: 0;
   left: 0;
@@ -1371,7 +1550,8 @@ export default {
 
 .rules-content,
 .challenge-content,
-.gameover-content {
+.gameover-content,
+.difficulty-content {
   background: #2d2a28;
   border: 1px solid rgba(180, 170, 160, 0.15);
   border-radius: 12px;
@@ -1386,7 +1566,8 @@ export default {
 
 .rules-header,
 .challenge-header,
-.gameover-header {
+.gameover-header,
+.difficulty-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -1417,6 +1598,72 @@ export default {
 
 .challenge-header:not(.success) h2 {
   color: #b56565;
+}
+
+/* 难度选择样式 */
+.difficulty-body {
+  padding: 32px;
+}
+
+.difficulty-options {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.difficulty-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px;
+  background: rgba(60, 57, 54, 0.6);
+  border: 2px solid rgba(180, 170, 160, 0.15);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.difficulty-card:hover {
+  border-color: #c4a77d;
+  background: rgba(196, 167, 125, 0.1);
+  transform: translateY(-2px);
+}
+
+.difficulty-card.easy {
+  border-left: 4px solid #8b9a6d;
+}
+
+.difficulty-card.medium {
+  border-left: 4px solid #c4a77d;
+}
+
+.difficulty-card.hard {
+  border-left: 4px solid #b56565;
+}
+
+.difficulty-icon {
+  font-size: 32px;
+  margin-bottom: 8px;
+}
+
+.difficulty-name {
+  font-size: 18px;
+  font-weight: 600;
+  color: rgba(245, 240, 230, 0.95);
+  margin-bottom: 4px;
+}
+
+.difficulty-desc {
+  font-size: 13px;
+  color: rgba(180, 170, 160, 0.7);
+  text-align: center;
+}
+
+.difficulty-footer {
+  padding: 16px 24px;
+  border-top: 1px solid rgba(180, 170, 160, 0.12);
+  display: flex;
+  justify-content: center;
 }
 
 .rules-close {
@@ -1609,6 +1856,49 @@ export default {
 
 .winner-name {
   font-size: 24px;
+  color: #c4a77d;
+  font-weight: 600;
+}
+
+/* 游戏统计 */
+.game-stats {
+  margin-top: 24px;
+  padding: 20px;
+  background: rgba(60, 57, 54, 0.6);
+  border-radius: 12px;
+  border: 1px solid rgba(180, 170, 160, 0.15);
+}
+
+.game-stats h3 {
+  font-size: 16px;
+  color: #c4a77d;
+  margin-bottom: 16px;
+  text-align: center;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.stat-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px;
+  background: rgba(50, 47, 44, 0.8);
+  border-radius: 8px;
+}
+
+.stat-label {
+  font-size: 12px;
+  color: rgba(180, 170, 160, 0.7);
+  margin-bottom: 6px;
+}
+
+.stat-value {
+  font-size: 16px;
   color: #c4a77d;
   font-weight: 600;
 }
