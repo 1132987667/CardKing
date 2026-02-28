@@ -1,13 +1,15 @@
 <template>
   <div id="app" :class="{ 'is-mobile': isMobile, 'is-desktop': !isMobile }">
+    <!-- 弹珠游戏 -->
+    <MarbleGame v-if="marbleStore.gamePhase === 'playing'" @back-to-menu="handleBackToMenu" />
     <!-- 扑克抢银行游戏 -->
-    <BankGameMobile v-if="bankStore.gamePhase !== 'menu' && isMobile" @back-to-menu="handleBackToMenu" />
+    <BankGameMobile v-else-if="bankStore.gamePhase !== 'menu' && isMobile" @back-to-menu="handleBackToMenu" />
     <BankGamePC v-else-if="bankStore.gamePhase !== 'menu' && !isMobile" @back-to-menu="handleBackToMenu" />
     <!-- 吹牛皮游戏 -->
     <BluffGameMobile v-else-if="bluffStore.gamePhase !== 'menu' && isMobile" @back-to-menu="handleBackToMenu" />
     <BluffGame v-else-if="bluffStore.gamePhase !== 'menu' && !isMobile" @back-to-menu="handleBackToMenu" />
     <!-- 主菜单 -->
-    <MainMenu v-else-if="gameStore.gamePhase === 'menu' && !isSetGameStarted && !isBluffGameStarted && !isBankGameStarted" />
+    <MainMenu v-else-if="gameStore.gamePhase === 'menu' && !isSetGameStarted && !isBluffGameStarted && !isBankGameStarted && marbleStore.gamePhase === 'menu'" />
     <!-- 形色牌游戏 -->
     <SetGameMobile v-else-if="isMobile && isSetGameStarted && setStore.gamePhase !== 'gameOver'"
       @back-to-menu="handleBackToMenu" />
@@ -34,10 +36,12 @@ import BluffGame from './components/BluffGame.vue'
 import BluffGameMobile from './components/BluffGameMobile.vue'
 import BankGamePC from './components/BankGamePC.vue'
 import BankGameMobile from './components/BankGameMobile.vue'
+import MarbleGame from './components/MarbleGame.vue'
 import gameStore from './store/gameStore.js'
 import setGameStore from './store/setGameStore.js'
 import bluffStore from './store/bluffGameStore.js'
 import bankGameStore from './store/bankGameStore.js'
+import marbleGameStore from './store/marbleGameStore.js'
 import deviceDetector from './utils/deviceDetector.js'
 
 export default {
@@ -52,7 +56,8 @@ export default {
     BluffGame,
     BluffGameMobile,
     BankGamePC,
-    BankGameMobile
+    BankGameMobile,
+    MarbleGame
   },
   setup () {
     const isMobile = ref(false)
@@ -76,6 +81,7 @@ export default {
       setStore.backToMenu()
       gameStore.backToMenu()
       bankStore.backToMenu()
+      marbleGameStore.backToMenu()
     }
 
     onMounted(() => {
@@ -123,6 +129,7 @@ export default {
       setStore,
       bluffStore,
       bankStore,
+      marbleStore: marbleGameStore,
       isMobile,
       isSetGameStarted,
       isBluffGameStarted,

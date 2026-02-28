@@ -516,6 +516,11 @@ export default {
       }
     })
 
+    // 获取当前玩家（供模板使用）
+    const getCurrentPlayer = () => {
+      return bankStore.getCurrentPlayer()
+    }
+
     return {
       bankStore,
       showSetup,
@@ -531,6 +536,7 @@ export default {
       getPlayerInitial,
       getPlayerIndex,
       isCurrentPlayer,
+      getCurrentPlayer,
       getPayer,
       getPayerIndex,
       getHandValue,

@@ -41,9 +41,17 @@
             </a>
           </li>
           <li>
-            <a href="#" class="toc-item" @click.prevent="showSettings = true">
+            <a href="#" class="toc-item" @click.prevent="startMarbleGame">
               <div class="toc-content">
                 <span class="game-index">05</span>
+                <span class="game-title">弹珠大师</span>
+              </div>
+            </a>
+          </li>
+          <li>
+            <a href="#" class="toc-item" @click.prevent="showSettings = true">
+              <div class="toc-content">
+                <span class="game-index">06</span>
                 <span class="game-title">游戏设置</span>
               </div>
             </a>
@@ -169,6 +177,7 @@ import gameStore from '../store/gameStore.js'
 import setGameStore from '../store/setGameStore.js'
 import bluffStore from '../store/bluffGameStore.js'
 import bankGameStore from '../store/bankGameStore.js'
+import marbleGameStore from '../store/marbleGameStore.js'
 
 export default {
   name: 'MainMenu',
@@ -197,6 +206,10 @@ export default {
       setGameStore.startGame()
     }
 
+    const startMarbleGame = () => {
+      marbleGameStore.startGame()
+    }
+
     return {
       cpuCount,
       roundCount,
@@ -205,7 +218,8 @@ export default {
       startBankGame,
       startBluffGame,
       startTripleCardGame,
-      startSetGame
+      startSetGame,
+      startMarbleGame
     }
   }
 }

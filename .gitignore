@@ -13,8 +13,8 @@ dist-ssr
 *.local
 
 .git/
+参考界面/
 
-界面.html
 
 # Editor directories and files
 .vscode/*
