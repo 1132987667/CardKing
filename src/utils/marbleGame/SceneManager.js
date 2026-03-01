@@ -1,332 +1,540 @@
-import * as THREE from 'three'
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
+import Phaser from 'phaser'
+
+export class GameScene extends Phaser.Scene {
+  constructor() {
+    super({ key: 'GameScene' })
+    this.balls = new Map()
+    this.holes = []
+    this.aimLine = null
+    this.aimArrow = null
+    this.selectedBall = null
+    this.isDragging = false
+    this.dragStart = { x: 0, y: 0 }
+    this.maxDragDistance = 150
+    this.forceMultiplier = 0.015
+    this.onBallEnterHole = null
+    this.onShoot = null
+    this.onBallStopped = null
+  }
+
+  preload() {
+    this.createGameTextures()
+  }
+
+  create() {
+    this.createGround()
+    this.createAimGraphics()
+    this.setupInput()
+  }
+
+  createGameTextures() {
+    const ballColors = [
+      { name: 'ball_red', color: 0xe74c3c },
+      { name: 'ball_blue', color: 0x3498db },
+      { name: 'ball_green', color: 0x2ecc71 },
+      { name: 'ball_yellow', color: 0xf1c40f },
+      { name: 'ball_purple', color: 0x9b59b6 },
+    ]
+
+    ballColors.forEach(({ name, color }) => {
+      const graphics = this.make.graphics({ x: 0, y: 0, add: false })
+      const radius = 20
+      graphics.fillStyle(color, 1)
+      graphics.fillCircle(radius, radius, radius)
+      graphics.fillStyle(0xffffff, 0.3)
+      graphics.fillCircle(radius - 5, radius - 5, 6)
+      graphics.generateTexture(name, radius * 2, radius * 2)
+      graphics.destroy()
+    })
+
+    const holeGraphics = this.make.graphics({ x: 0, y: 0, add: false })
+    holeGraphics.fillStyle(0x1a0f08, 1)
+    holeGraphics.fillCircle(30, 30, 30)
+    holeGraphics.fillStyle(0x0d0705, 1)
+    holeGraphics.fillCircle(30, 30, 20)
+    holeGraphics.generateTexture('hole', 60, 60)
+    holeGraphics.destroy()
+
+    const groundGraphics = this.make.graphics({ x: 0, y: 0, add: false })
+    groundGraphics.fillStyle(0x8b7355, 1)
+    groundGraphics.fillRect(0, 0, 64, 64)
+    for (let i = 0; i < 100; i++) {
+      const shade = 0x5c4033 + Math.floor(Math.random() * 0x202020)
+      groundGraphics.fillStyle(shade, 0.3)
+      groundGraphics.fillCircle(Math.random() * 64, Math.random() * 64, Math.random() * 3 + 1)
+    }
+    groundGraphics.generateTexture('ground', 64, 64)
+    groundGraphics.destroy()
+  }
+
+  createGround() {
+    const { width, height } = this.scale
+    this.ground = this.add.tileSprite(width / 2, height / 2, width, height, 'ground')
+    this.ground.setDepth(0)
+  }
+
+  createHoles(holesData) {
+    this.holes = []
+    holesData.forEach((holeData) => {
+      const hole = this.add.image(holeData.x, holeData.z, 'hole')
+      hole.setDepth(1)
+      hole.setData('id', holeData.id)
+      hole.setData('isFinish', holeData.isFinish)
+      hole.setData('radius', holeData.radius)
+      hole.setScale(holeData.radius / 30)
+      this.holes.push(hole)
+      
+      const holeLabel = this.add.text(holeData.x, holeData.z, String(holeData.order), {
+        fontSize: '20px',
+        fontFamily: 'Arial',
+        color: '#ffffff',
+        fontStyle: 'bold'
+      })
+      holeLabel.setOrigin(0.5)
+      holeLabel.setDepth(2)
+    })
+  }
+
+  createBall(playerId, x, y, color = 0xe74c3c) {
+    const colorMap = {
+      [0xe74c3c]: 'ball_red',
+      [0x3498db]: 'ball_blue',
+      [0x2ecc71]: 'ball_green',
+      [0xf1c40f]: 'ball_yellow',
+      [0x9b59b6]: 'ball_purple',
+    }
+
+    const textureKey = colorMap[color] || 'ball_red'
+    const ball = this.matter.add.image(x, y, textureKey)
+    ball.setCircle(18, {
+      friction: 0.3,
+      frictionAir: 0.02,
+      restitution: 0.6,
+      density: 0.002,
+    })
+    ball.setBounce(0.6)
+    ball.setDepth(10)
+    ball.setData('playerId', playerId)
+    ball.setData('isInHole', false)
+    ball.setData('currentHole', null)
+
+    this.balls.set(playerId, ball)
+    return ball
+  }
+
+  createAimGraphics() {
+    this.aimLine = this.add.graphics()
+    this.aimLine.setDepth(20)
+    this.aimArrow = this.add.graphics()
+    this.aimArrow.setDepth(20)
+  }
+
+  setupInput() {
+    this.input.on('pointerdown', this.handlePointerDown, this)
+    this.input.on('pointermove', this.handlePointerMove, this)
+    this.input.on('pointerup', this.handlePointerUp, this)
+  }
+
+  handlePointerDown(pointer) {
+    if (pointer.x < 0 || pointer.y < 0) return
+
+    const ball = this.getBallAtPosition(pointer.x, pointer.y)
+    if (ball && !ball.getData('isInHole')) {
+      this.selectedBall = ball
+      this.isDragging = true
+      this.dragStart = { x: pointer.x, y: pointer.y }
+    }
+  }
+
+  handlePointerMove(pointer) {
+    if (!this.isDragging || !this.selectedBall) return
+
+    const dx = this.dragStart.x - pointer.x
+    const dy = this.dragStart.y - pointer.y
+    const distance = Math.sqrt(dx * dx + dy * dy)
+
+    let currentX = pointer.x
+    let currentY = pointer.y
+
+    if (distance > this.maxDragDistance) {
+      const scale = this.maxDragDistance / distance
+      currentX = this.dragStart.x - dx * scale
+      currentY = this.dragStart.y - dy * scale
+    }
+
+    this.drawAimLine(currentX, currentY)
+  }
+
+  handlePointerUp(pointer) {
+    if (!this.isDragging || !this.selectedBall) {
+      this.hideAimLine()
+      this.isDragging = false
+      this.selectedBall = null
+      return
+    }
+
+    const force = this.calculateForce(pointer.x, pointer.y)
+    if (force.magnitude > 0.5 && this.onShoot) {
+      this.selectedBall.setVelocity(force.x, force.y)
+      if (this.onShoot) {
+        this.onShoot(this.selectedBall.getData('playerId'), force)
+      }
+    }
+
+    this.hideAimLine()
+    this.isDragging = false
+    this.selectedBall = null
+  }
+
+  getBallAtPosition(x, y) {
+    for (const [_, ball] of this.balls) {
+      const distance = Phaser.Math.Distance.Between(x, y, ball.x, ball.y)
+      if (distance < 25) {
+        return ball
+      }
+    }
+    return null
+  }
+
+  drawAimLine(pointerX, pointerY) {
+    this.aimLine.clear()
+    this.aimArrow.clear()
+
+    if (!this.selectedBall) return
+
+    const dx = this.dragStart.x - pointerX
+    const dy = this.dragStart.y - pointerY
+    const distance = Math.sqrt(dx * dx + dy * dy)
+    const ratio = Math.min(distance / this.maxDragDistance, 1)
+
+    const directionX = dx / distance || 0
+    const directionY = dy / distance || 0
+
+    const ballX = this.selectedBall.x
+    const ballY = this.selectedBall.y
+
+    this.aimLine.lineStyle(3, 0xffd700, 0.8)
+    this.aimLine.lineBetween(this.dragStart.x, this.dragStart.y, pointerX, pointerY)
+
+    const arrowLength = ratio * 100
+    const endX = ballX + directionX * arrowLength
+    const endY = ballY + directionY * arrowLength
+
+    this.aimArrow.lineStyle(4, 0xffd700, 0.9)
+    this.aimArrow.lineBetween(ballX, ballY, endX, endY)
+
+    const arrowHeadSize = 10
+    const angle = Math.atan2(directionY, directionX)
+    this.aimArrow.fillStyle(0xffd700, 0.9)
+    this.aimArrow.beginPath()
+    this.aimArrow.moveTo(endX, endY)
+    this.aimArrow.lineTo(
+      endX - arrowHeadSize * Math.cos(angle - Math.PI / 6),
+      endY - arrowHeadSize * Math.sin(angle - Math.PI / 6)
+    )
+    this.aimArrow.lineTo(
+      endX - arrowHeadSize * Math.cos(angle + Math.PI / 6),
+      endY - arrowHeadSize * Math.sin(angle + Math.PI / 6)
+    )
+    this.aimArrow.closePath()
+    this.aimArrow.fillPath()
+  }
+
+  hideAimLine() {
+    this.aimLine.clear()
+    this.aimArrow.clear()
+  }
+
+  calculateForce(pointerX, pointerY) {
+    const dx = this.dragStart.x - pointerX
+    const dy = this.dragStart.y - pointerY
+    const distance = Math.sqrt(dx * dx + dy * dy)
+    const ratio = Math.min(distance / this.maxDragDistance, 1)
+    const magnitude = ratio * this.maxDragDistance * this.forceMultiplier
+
+    return {
+      x: (dx / distance || 0) * magnitude,
+      y: (dy / distance || 0) * magnitude,
+      magnitude: magnitude,
+      ratio: ratio,
+    }
+  }
+
+  update() {
+    this.checkHoleCollisions()
+    this.checkBallStopped()
+  }
+
+  checkHoleCollisions() {
+    for (const [playerId, ball] of this.balls) {
+      if (ball.getData('isInHole')) continue
+
+      const velocity = Math.sqrt(ball.body.velocity.x ** 2 + ball.body.velocity.y ** 2)
+
+      for (const hole of this.holes) {
+        const distance = Phaser.Math.Distance.Between(ball.x, ball.y, hole.x, hole.y)
+        const holeRadius = hole.getData('radius') || 30
+
+        if (distance < holeRadius * 0.7 && velocity < 2) {
+          ball.setData('isInHole', true)
+          ball.setData('currentHole', hole.getData('id'))
+          ball.setVelocity(0, 0)
+          ball.setPosition(hole.x, hole.y)
+          ball.setStatic(true)
+
+          if (this.onBallEnterHole) {
+            this.onBallEnterHole(playerId, hole.getData('id'), hole.getData('isFinish'))
+          }
+          break
+        }
+      }
+    }
+  }
+
+  checkBallStopped() {
+    for (const [playerId, ball] of this.balls) {
+      if (ball.getData('isInHole')) continue
+
+      const velocity = Math.sqrt(ball.body.velocity.x ** 2 + ball.body.velocity.y ** 2)
+      if (velocity < 0.1 && this.onBallStopped) {
+        this.onBallStopped(playerId)
+      }
+    }
+  }
+
+  getBallPosition(playerId) {
+    const ball = this.balls.get(playerId)
+    return ball ? { x: ball.x, y: ball.y } : null
+  }
+
+  getBallVelocity(playerId) {
+    const ball = this.balls.get(playerId)
+    if (!ball) return 0
+    return Math.sqrt(ball.body.velocity.x ** 2 + ball.body.velocity.y ** 2)
+  }
+
+  isBallStopped(playerId, threshold = 0.1) {
+    const ball = this.balls.get(playerId)
+    if (!ball) return true
+    const velocity = Math.sqrt(ball.body.velocity.x ** 2 + ball.body.velocity.y ** 2)
+    return velocity < threshold
+  }
+
+  resetBallPosition(playerId, x, y) {
+    const ball = this.balls.get(playerId)
+    if (ball) {
+      ball.setPosition(x, y)
+      ball.setVelocity(0, 0)
+      ball.setStatic(false)
+      ball.setData('isInHole', false)
+      ball.setData('currentHole', null)
+    }
+  }
+
+  setBallInHole(playerId, inHole, holeId = null) {
+    const ball = this.balls.get(playerId)
+    if (ball) {
+      ball.setData('isInHole', inHole)
+      ball.setData('currentHole', holeId)
+      if (inHole) {
+        ball.setStatic(true)
+      }
+    }
+  }
+
+  applyImpulse(playerId, force) {
+    const ball = this.balls.get(playerId)
+    if (ball && !ball.getData('isInHole')) {
+      ball.setVelocity(force.x, force.y)
+    }
+  }
+
+  showMessage(text, type = 'info') {
+    const { width } = this.scale
+    const colorMap = {
+      info: 0x3498db,
+      success: 0x2ecc71,
+      warning: 0xf39c12,
+      error: 0xe74c3c,
+    }
+
+    if (this.messageText) {
+      this.messageText.destroy()
+    }
+
+    this.messageText = this.add.text(width / 2, 50, text, {
+      fontSize: '24px',
+      fontFamily: 'Arial',
+      color: '#ffffff',
+      backgroundColor: '#' + colorMap[type].toString(16).padStart(6, '0'),
+      padding: { x: 20, y: 10 },
+    })
+    this.messageText.setOrigin(0.5)
+    this.messageText.setDepth(100)
+
+    this.time.delayedCall(2000, () => {
+      if (this.messageText) {
+        this.messageText.destroy()
+        this.messageText = null
+      }
+    })
+  }
+
+  createParticleEffect(x, y, color = 0xffd700) {
+    const particles = this.add.particles(x, y, null, {
+      speed: { min: 50, max: 150 },
+      scale: { start: 0.4, end: 0 },
+      lifespan: 500,
+      quantity: 20,
+      tint: color,
+    })
+    this.time.delayedCall(600, () => particles.destroy())
+  }
+}
 
 export class SceneManager {
   constructor(container) {
     this.container = container
-    this.scene = null
-    this.camera = null
-    this.renderer = null
-    this.lights = {}
-    this.meshes = {}
-    this.materials = {}
-    this.pmremGenerator = null
-    
+    this.game = null
+    this.gameScene = null
+    this._readyCallbacks = []
     this.init()
   }
 
   init() {
-    this.initScene()
-    this.initCamera()
-    this.initRenderer()
-    this.initLights()
-    this.initMaterials()
+    const width = this.container.clientWidth || 800
+    const height = this.container.clientHeight || 600
+
+    const config = {
+      type: Phaser.AUTO,
+      width: width,
+      height: height,
+      parent: this.container,
+      backgroundColor: '#8b7355',
+      physics: {
+        default: 'matter',
+        matter: {
+          gravity: { x: 0, y: 0 },
+          debug: false,
+        },
+      },
+      scene: GameScene,
+    }
+
+    this.game = new Phaser.Game(config)
+    
+    this.game.events.on('ready', () => {
+      this.gameScene = this.game.scene.getScene('GameScene')
+      this._readyCallbacks.forEach(cb => cb())
+      this._readyCallbacks = []
+    })
+
     this.handleResize()
   }
 
-  initScene() {
-    this.scene = new THREE.Scene()
-    this.scene.background = new THREE.Color(0x87CEEB)
-    this.scene.fog = new THREE.Fog(0x87CEEB, 50, 150)
-    
-    // 添加辅助网格 - 使用亮色让调试更明显
-    const gridHelper = new THREE.GridHelper(50, 50, 0x000000, 0x444444)
-    gridHelper.position.y = 0.01
-    this.scene.add(gridHelper)
-    
-    // 添加测试立方体
-    const testGeo = new THREE.BoxGeometry(2, 2, 2)
-    const testMat = new THREE.MeshBasicMaterial({ color: 0xff0000 })
-    const testCube = new THREE.Mesh(testGeo, testMat)
-    testCube.position.set(0, 2, 0)
-    this.scene.add(testCube)
-    console.log('测试立方体添加到场景')
-  }
-
-  initCamera() {
-    const width = this.container.clientWidth || 800
-    const height = this.container.clientHeight || 600
-    const aspect = width / height
-    this.camera = new THREE.PerspectiveCamera(60, aspect, 0.1, 200)
-    this.camera.position.set(0, 20, 25)
-    this.camera.lookAt(0, 0, -10)
-  }
-
-  initRenderer() {
-    this.renderer = new THREE.WebGLRenderer({
-      antialias: true,
-      alpha: false,
-      powerPreference: 'high-performance'
-    })
-    const width = this.container.clientWidth || 800
-    const height = this.container.clientHeight || 600
-    this.renderer.setSize(width, height)
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
-    this.renderer.shadowMap.enabled = true
-    this.renderer.shadowMap.type = THREE.PCFShadowMap
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping
-    this.renderer.toneMappingExposure = 1.2
-    this.container.appendChild(this.renderer.domElement)
-    
-    this.pmremGenerator = new THREE.PMREMGenerator(this.renderer)
-    this.pmremGenerator.compileEquirectangularShader()
-    const roomEnv = new RoomEnvironment(this.renderer)
-    const envMap = this.pmremGenerator.fromScene(roomEnv).texture
-    this.scene.environment = envMap
-    roomEnv.dispose()
-  }
-
-  initLights() {
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6)
-    this.scene.add(ambientLight)
-    this.lights.ambient = ambientLight
-
-    const dirLight = new THREE.DirectionalLight(0xfffff0, 1.5)
-    dirLight.position.set(15, 25, 10)
-    dirLight.castShadow = true
-    dirLight.shadow.mapSize.width = 2048
-    dirLight.shadow.mapSize.height = 2048
-    dirLight.shadow.camera.near = 0.5
-    dirLight.shadow.camera.far = 60
-    dirLight.shadow.camera.left = -25
-    dirLight.shadow.camera.right = 25
-    dirLight.shadow.camera.top = 25
-    dirLight.shadow.camera.bottom = -25
-    dirLight.shadow.bias = -0.0005
-    this.scene.add(dirLight)
-    this.lights.directional = dirLight
-
-    const fillLight = new THREE.DirectionalLight(0xe6f3ff, 0.5)
-    fillLight.position.set(-15, 15, -10)
-    this.scene.add(fillLight)
-    this.lights.fill = fillLight
-
-    const hemiLight = new THREE.HemisphereLight(0x87CEEB, 0x8b7355, 0.4)
-    this.scene.add(hemiLight)
-    this.lights.hemi = hemiLight
-  }
-
-  initMaterials() {
-    const groundTexture = this.createNoiseTexture(512, '#8b7355', '#6b5344')
-    const groundMaterial = new THREE.MeshStandardMaterial({
-      map: groundTexture,
-      roughness: 0.85,
-      metalness: 0.0,
-      color: 0xc4a574
-    })
-    this.materials.ground = groundMaterial
-
-    const glassMaterial = new THREE.MeshPhysicalMaterial({
-      color: 0xffffff,
-      metalness: 0.0,
-      roughness: 0.1,
-      transmission: 0.9,
-      thickness: 1.0,
-      ior: 1.5,
-      clearcoat: 1.0,
-      clearcoatRoughness: 0.1,
-      envMapIntensity: 1.5
-    })
-    this.materials.glass = glassMaterial
-
-    const holeMaterial = new THREE.MeshStandardMaterial({
-      color: 0x5c4033,
-      roughness: 1.0,
-      metalness: 0.0
-    })
-    this.materials.hole = holeMaterial
-
-    const aimLineMaterial = new THREE.LineBasicMaterial({
-      color: 0xffd700,
-      linewidth: 3,
-      transparent: true,
-      opacity: 0.8
-    })
-    this.materials.aimLine = aimLineMaterial
-  }
-
-  createNoiseTexture(size, color1, color2) {
-    const canvas = document.createElement('canvas')
-    canvas.width = size
-    canvas.height = size
-    const ctx = canvas.getContext('2d')
-
-    ctx.fillStyle = color1
-    ctx.fillRect(0, 0, size, size)
-
-    for (let i = 0; i < 5000; i++) {
-      const x = Math.random() * size
-      const y = Math.random() * size
-      const radius = Math.random() * 2 + 0.5
-      ctx.beginPath()
-      ctx.arc(x, y, radius, 0, Math.PI * 2)
-      ctx.fillStyle = Math.random() > 0.5 ? color2 : color1
-      ctx.globalAlpha = 0.1 + Math.random() * 0.2
-      ctx.fill()
+  onReady(callback) {
+    if (this.gameScene) {
+      callback()
+    } else {
+      this._readyCallbacks.push(callback)
     }
-
-    const texture = new THREE.CanvasTexture(canvas)
-    texture.wrapS = THREE.RepeatWrapping
-    texture.wrapT = THREE.RepeatWrapping
-    texture.repeat.set(4, 4)
-    return texture
   }
 
-  createGround(width, depth, heightData = null) {
-    const geometry = new THREE.PlaneGeometry(width, depth, 32, 32)
-    
-    if (heightData) {
-      const positions = geometry.attributes.position
-      for (let i = 0; i < positions.count; i++) {
-        const x = positions.getX(i)
-        const z = positions.getZ(i)
-        const row = Math.floor((z + depth / 2) / depth * (heightData.length - 1))
-        const col = Math.floor((x + width / 2) / width * (heightData[0].length - 1))
-        if (heightData[row] && heightData[row][col] !== undefined) {
-          positions.setY(i, heightData[row][col] * 0.5)
-        }
-      }
-      geometry.computeVertexNormals()
+  createGroundWithHoles(width, depth, holes) {
+    if (this.gameScene) {
+      this.gameScene.createHoles(holes)
     }
-
-    const ground = new THREE.Mesh(geometry, this.materials.ground)
-    ground.rotation.x = -Math.PI / 2
-    ground.position.y = 0
-    ground.receiveShadow = true
-    this.scene.add(ground)
-    this.meshes.ground = ground
-    return ground
-  }
-
-  createHole(x, z, radius) {
-    const geometry = new THREE.CylinderGeometry(radius, radius * 0.8, 0.2, 32)
-    const hole = new THREE.Mesh(geometry, this.materials.hole)
-    hole.position.set(x, 0.05, z)
-    hole.receiveShadow = true
-    this.scene.add(hole)
-    return hole
   }
 
   createBall(radius, color, position) {
-    const geometry = new THREE.SphereGeometry(radius, 32, 32)
-    const material = this.materials.glass.clone()
-    material.color = new THREE.Color(color)
-    
-    const ball = new THREE.Mesh(geometry, material)
-    ball.position.copy(position)
-    ball.castShadow = true
-    ball.receiveShadow = true
-    this.scene.add(ball)
-    return ball
-  }
-
-  createAimLine(start, end) {
-    const points = [start, end]
-    const geometry = new THREE.BufferGeometry().setFromPoints(points)
-    const line = new THREE.Line(geometry, this.materials.aimLine)
-    this.scene.add(line)
-    return line
-  }
-
-  removeAimLine(line) {
-    if (line) {
-      this.scene.remove(line)
-      line.geometry.dispose()
-    }
-  }
-
-  updateAimLine(line, start, end) {
-    if (line) {
-      const positions = line.geometry.attributes.position
-      positions.setXYZ(0, start.x, start.y, start.z)
-      positions.setXYZ(1, end.x, end.y, end.z)
-      positions.needsUpdate = true
-    }
-  }
-
-  createParticleEffect(position, color = 0xffd700, count = 20) {
-    const particles = []
-    const geometry = new THREE.BufferGeometry()
-    const positions = new Float32Array(count * 3)
-    const velocities = []
-
-    for (let i = 0; i < count; i++) {
-      positions[i * 3] = position.x
-      positions[i * 3 + 1] = position.y
-      positions[i * 3 + 2] = position.z
-      
-      velocities.push({
-        x: (Math.random() - 0.5) * 0.3,
-        y: Math.random() * 0.3,
-        z: (Math.random() - 0.5) * 0.3
-      })
-    }
-
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
-    
-    const material = new THREE.PointsMaterial({
-      color: color,
-      size: 0.15,
-      transparent: true,
-      opacity: 1.0,
-      blending: THREE.AdditiveBlending
-    })
-
-    const particleSystem = new THREE.Points(geometry, material)
-    this.scene.add(particleSystem)
-
-    return { mesh: particleSystem, velocities, life: 1.0 }
-  }
-
-  updateParticles(particleSystem, deltaTime) {
-    if (!particleSystem || particleSystem.life <= 0) return false
-
-    const positions = particleSystem.mesh.geometry.attributes.position
-    particleSystem.life -= deltaTime * 1.5
-
-    for (let i = 0; i < particleSystem.velocities.length; i++) {
-      const v = particleSystem.velocities[i]
-      positions.setXYZ(
-        i,
-        positions.getX(i) + v.x * deltaTime,
-        positions.getY(i) + v.y * deltaTime,
-        positions.getZ(i) + v.z * deltaTime
+    if (this.gameScene) {
+      return this.gameScene.createBall(
+        position.playerId || 0,
+        position.x,
+        position.y,
+        color
       )
-      v.y -= 0.5 * deltaTime
     }
+    return null
+  }
 
-    positions.needsUpdate = true
-    particleSystem.mesh.material.opacity = particleSystem.life
+  getBallPosition(playerId) {
+    if (this.gameScene) {
+      return this.gameScene.getBallPosition(playerId)
+    }
+    return null
+  }
 
-    if (particleSystem.life <= 0) {
-      this.scene.remove(particleSystem.mesh)
-      particleSystem.mesh.geometry.dispose()
-      particleSystem.mesh.material.dispose()
-      return false
+  getBallVelocity(playerId) {
+    if (this.gameScene) {
+      return this.gameScene.getBallVelocity(playerId)
+    }
+    return 0
+  }
+
+  isBallStopped(playerId, threshold = 0.1) {
+    if (this.gameScene) {
+      return this.gameScene.isBallStopped(playerId, threshold)
     }
     return true
   }
 
-  setCameraTarget(target, offset = { x: 0, y: 12, z: 15 }) {
-    const desiredPosition = new THREE.Vector3(
-      target.x + offset.x,
-      target.y + offset.y,
-      target.z + offset.z
-    )
-    this.camera.position.lerp(desiredPosition, 0.05)
-    this.camera.lookAt(target)
+  resetBallPosition(playerId, position) {
+    if (this.gameScene) {
+      this.gameScene.resetBallPosition(playerId, position.x, position.y)
+    }
+  }
+
+  setBallInHole(playerId, inHole, holeId = null) {
+    if (this.gameScene) {
+      this.gameScene.setBallInHole(playerId, inHole, holeId)
+    }
+  }
+
+  applyImpulse(playerId, impulse) {
+    if (this.gameScene) {
+      this.gameScene.applyImpulse(playerId, impulse)
+    }
+  }
+
+  showMessage(text, type = 'info') {
+    if (this.gameScene) {
+      this.gameScene.showMessage(text, type)
+    }
+  }
+
+  createParticleEffect(position, color = 0xffd700) {
+    if (this.gameScene) {
+      this.gameScene.createParticleEffect(position.x, position.y, color)
+    }
+  }
+
+  setOnBallEnterHole(callback) {
+    if (this.gameScene) {
+      this.gameScene.onBallEnterHole = callback
+    }
+  }
+
+  setOnShoot(callback) {
+    if (this.gameScene) {
+      this.gameScene.onShoot = callback
+    }
+  }
+
+  setOnBallStopped(callback) {
+    if (this.gameScene) {
+      this.gameScene.onBallStopped = callback
+    }
   }
 
   handleResize() {
     const resize = () => {
-      if (!this.container || !this.camera || !this.renderer) return
-      
+      if (!this.container || !this.game) return
+
       const width = this.container.clientWidth || 800
       const height = this.container.clientHeight || 600
-      
-      this.camera.aspect = width / height
-      this.camera.updateProjectionMatrix()
-      this.renderer.setSize(width, height)
+
+      this.game.scale.resize(width, height)
     }
 
     window.addEventListener('resize', resize)
@@ -335,39 +543,14 @@ export class SceneManager {
   }
 
   render() {
-    console.log('render被调用', {
-      renderer: !!this.renderer,
-      scene: !!this.scene,
-      camera: !!this.camera,
-      sceneChildren: this.scene?.children?.length
-    })
-    if (this.renderer && this.scene && this.camera) {
-      this.renderer.render(this.scene, this.camera)
-      console.log('渲染完成')
-    } else {
-      console.error('渲染失败：缺少必要的组件')
-    }
+    // Phaser handles its own rendering
   }
 
   dispose() {
-    Object.values(this.meshes).forEach(mesh => {
-      if (mesh.geometry) mesh.geometry.dispose()
-      if (mesh.material) {
-        if (Array.isArray(mesh.material)) {
-          mesh.material.forEach(m => m.dispose())
-        } else {
-          mesh.material.dispose()
-        }
-      }
-    })
-
-    Object.values(this.materials).forEach(material => {
-      material.dispose()
-    })
-
-    if (this.renderer) {
-      this.renderer.dispose()
-      this.container.removeChild(this.renderer.domElement)
+    if (this.game) {
+      this.game.destroy(true)
+      this.game = null
+      this.gameScene = null
     }
   }
 }

@@ -1,6 +1,7 @@
 import { reactive } from 'vue'
 import Card from '../utils/Card.js'
 import { Suit } from '../utils/constants.js'
+import { getCPUNames } from '../utils/cpuNames.js'
 
 /**
  * 扑克抢银行游戏状态管理
@@ -96,10 +97,11 @@ const bankGameStore = reactive({
     this.players = [
       { id: 'player', name: '玩家', isAI: false, hand: [], isOut: false, totalValue: 0 },
     ]
+    const cpuNames = getCPUNames(playerCount - 1)
     for (let i = 1; i < playerCount; i++) {
       this.players.push({
         id: `cpu${i}`,
-        name: `电脑${i}`,
+        name: cpuNames[i - 1],
         isAI: true,
         hand: [],
         isOut: false,

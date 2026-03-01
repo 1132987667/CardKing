@@ -56,56 +56,29 @@
       </div>
 
       <div class="header-right">
-        <button class="home-btn" @click="backToMenu">
-          <span class="home-icon">⌂</span>
-          <span class="home-text">首页</span>
-        </button>
         <div class="status-indicator">
           <span class="status-dot" :class="{ 'is-active': isPlayerTurn }"></span>
           {{ statusText }}
         </div>
+        <button class="home-btn" @click="backToMenu">
+          <span class="home-icon">⌂</span>
+          <span class="home-text">首页</span>
+        </button>
       </div>
     </header>
 
     <!-- 主游戏区域 -->
     <div class="main-container">
-      <!-- 左侧玩家信息 -->
-      <aside class="sidebar">
-        <div class="sidebar-title">
-          <span class="title-line"></span>
-          玩家信息
-        </div>
-
-        <div class="player-list">
-          <div v-for="(player, index) in bluffStore.players" :key="player.id" class="player-card" :class="{
-            'is-me': !player.isAI,
-            'is-current': currentPlayerIndex === index,
-            'is-thinking': isAIThinking && currentPlayerIndex === index
-          }">
-            <div class="player-info">
-              <div class="player-avatar">{{ getPlayerInitial(player, index) }}</div>
-              <div class="player-detail">
-                <div class="player-name">{{ player.name }}</div>
-                <div class="player-status">{{ !player.isAI ? '我' : 'CPU' }}</div>
-              </div>
-            </div>
-            <div class="player-cards">
-              <span class="card-count">{{ player.cardCount }}张</span>
-            </div>
-          </div>
-        </div>
-      </aside>
-
       <!-- 中央牌堆区域 -->
       <main class="game-board">
-        <!-- 电脑玩家位置 (上方) -->
+        <!-- 所有玩家位置 (上方) -->
         <div class="opponents-area">
-          <div v-for="(player, index) in cpuPlayers" :key="player.id" class="opponent"
-            :class="{ 'is-current': isCurrentPlayer(player.id) }">
-            <div class="opponent-avatar">{{ getPlayerInitial(player, index + 1) }}</div>
-            <div class="opponent-name">{{ player.name }}</div>
+          <div v-for="(player, index) in allPlayers" :key="player.id" class="opponent"
+            :class="{ 'is-current': isCurrentPlayer(player.id), 'is-me': !player.isAI }">
+            <div class="opponent-avatar">{{ getPlayerInitial(player, index) }}</div>
+            <div class="opponent-name">{{ player.name }}{{ !player.isAI ? ' (我)' : '' }}</div>
             <div class="opponent-cards">{{ player.cardCount }}张</div>
-            <!-- 自动显示的操作提示 -->
+            <!-- 自动显示的操作提示 (下方) -->
             <div v-if="playerTooltip[player.id]" class="opponent-tooltip">
               <div class="tooltip-content">
                 <div v-if="getPlayerLastAction(player.id)" class="tooltip-action">
@@ -316,7 +289,7 @@
           </p>
           <p v-else class="challenge-result-text">
             {{ getPlayerName(challengeResult.challengedId) }} 说的是真话！<br>
-            所有牌确实是 {{ bluffStore.currentRank }}
+            所有牌确实是 {{ bluffStore.currentRank }}！
           </p>
 
           <div class="revealed-cards">
@@ -429,6 +402,10 @@ export default {
       return bluffStore.players.filter(p => p.isAI)
     })
 
+    const allPlayers = computed(() => {
+      return bluffStore.players
+    })
+
     const isPlayerTurn = computed(() => {
       const currentPlayer = bluffStore.getCurrentPlayer()
       return currentPlayer && !currentPlayer.isAI
@@ -475,7 +452,7 @@ export default {
       const currentPlayer = bluffStore.getCurrentPlayer()
       if (!currentPlayer) return '等待中'
       if (currentPlayer.isAI) return `${currentPlayer.name} 思考中`
-      return '你的回合'
+      return ''
     })
 
     const displayAccumulatedCards = computed(() => {
@@ -558,6 +535,8 @@ export default {
       if (success) {
         bluffStore.clearSelection()
         selectedRank.value = null
+        // 显示玩家操作提示
+        showPlayerTooltip('player')
       }
     }
 
@@ -565,11 +544,15 @@ export default {
       const result = bluffStore.challenge('player')
       if (result) {
         challengeResult.value = result
+        // 显示玩家操作提示
+        showPlayerTooltip('player')
       }
     }
 
     const handleSkip = () => {
       bluffStore.skip()
+      // 显示玩家操作提示
+      showPlayerTooltip('player')
     }
 
     const closeChallengeResult = () => {
@@ -601,7 +584,7 @@ export default {
       if (tooltipTimer) {
         clearTimeout(tooltipTimer)
       }
-      playerTooltip.value[playerId] = true
+      playerTooltip.value = { [playerId]: true }
     }
 
     // 隐藏玩家悬浮提示
@@ -612,9 +595,9 @@ export default {
     // 获取玩家最近的操作记录
     const getPlayerLastAction = (playerId) => {
       const player = bluffStore.players.find(p => p.id === playerId)
-      if (!player || !player.isAI) return null
+      if (!player) return null
 
-      // 从日志中查找该玩家的最近操作
+      // 从日志中查找该玩家的最近操作（日志用unshift添加，最新的在开头）
       const logs = bluffStore.logs
       for (const log of logs) {
         if (log.includes(player.name)) {
@@ -623,8 +606,10 @@ export default {
             if (match) {
               return `出牌 ${match[1]}张${match[2]}`
             }
-          } else if (log.includes('质疑')) {
-            return log.includes('质疑成功') ? '质疑成功' : '质疑失败'
+          } else if (log.includes('质疑成功')) {
+            return '质疑成功'
+          } else if (log.includes('质疑失败')) {
+            return '质疑失败'
           } else if (log.includes('跳过')) {
             return '跳过'
           }
@@ -698,17 +683,16 @@ export default {
         })
       }
 
-      // 显示操作提示2秒
+      // 显示操作提示（持续到下一轮）
       showPlayerTooltip(currentPlayer.id)
-      setTimeout(() => {
-        hidePlayerTooltip()
-      }, 2000)
 
       isAIThinking.value = false
     }
 
     // 监听当前玩家变化
     watch(() => bluffStore.currentPlayerIndex, () => {
+      // 新一轮开始，清除之前的提示
+      hidePlayerTooltip()
       // 如果质疑弹窗正在显示，不触发AI行动，等弹窗关闭后再触发
       if (challengeResult.value) {
         return
@@ -741,6 +725,7 @@ export default {
       playerTooltip,
       playerHand,
       cpuPlayers,
+      allPlayers,
       isPlayerTurn,
       currentPlayerIndex,
       isNewRound,
@@ -828,6 +813,10 @@ export default {
 
 .header-right {
   text-align: right;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
 }
 
 .logo {
@@ -894,7 +883,7 @@ export default {
 .main-container {
   flex: 1;
   display: grid;
-  grid-template-columns: 240px 1fr 240px;
+  grid-template-columns: 1fr 240px;
   gap: 16px;
   padding: 16px;
   overflow: hidden;
@@ -1050,7 +1039,27 @@ export default {
 
 .opponent.is-current {
   border-color: #c4a77d;
-  box-shadow: 0 0 20px rgba(196, 167, 125, 0.3);
+  border-width: 3px;
+  box-shadow: 0 0 20px rgba(196, 167, 125, 0.3), 0 0 40px rgba(196, 167, 125, 0.15);
+  animation: currentPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes currentPulse {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(196, 167, 125, 0.3), 0 0 40px rgba(196, 167, 125, 0.15);
+  }
+  50% {
+    box-shadow: 0 0 30px rgba(196, 167, 125, 0.5), 0 0 60px rgba(196, 167, 125, 0.25);
+  }
+}
+
+.opponent.is-me {
+  border-color: rgba(139, 154, 109, 0.5);
+  background: rgba(139, 154, 109, 0.1);
+}
+
+.opponent.is-me .opponent-name {
+  color: #8b9a6d;
 }
 
 .opponent-avatar {
@@ -1082,10 +1091,10 @@ export default {
 
 .opponent-tooltip {
   position: absolute;
-  bottom: 100%;
+  top: 100%;
   left: 50%;
   transform: translateX(-50%);
-  margin-bottom: 12px;
+  margin-top: 12px;
   z-index: 100;
   pointer-events: none;
 }
@@ -1513,7 +1522,6 @@ export default {
   font-size: 13px;
   cursor: pointer;
   transition: all 0.2s;
-  margin-right: 12px;
 }
 
 .home-btn:hover {

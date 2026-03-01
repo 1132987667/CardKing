@@ -104,7 +104,7 @@
             <span class="group-col">累计</span>
           </div>
           <div v-for="player in gameStore.players" :key="player.id" class="group-score-row">
-            <span class="group-col group-name">{{ player.isAI ? '电脑' + player.id.replace('cpu', '') : '玩家' }}</span>
+            <span class="group-col group-name">{{ player.name }}</span>
             <span class="group-col group-score" :class="{ 'score-positive': getGroupScore(player.id, 'single') > 0 }">
               +{{ getGroupScore(player.id, 'single') }}
             </span>
@@ -125,7 +125,7 @@
             <div class="cards-section-header">单张</div>
             <div class="cards-grid">
               <div v-for="player in gameStore.players" :key="player.id" class="player-cards">
-                <div class="player-label">{{ player.isAI ? '电脑' + player.id.replace('cpu', '') : '玩家' }}</div>
+                <div class="player-label">{{ player.name }}</div>
                 <div class="player-card">
                   <div class="cards-container">
                     <div v-for="(card, cardIndex) in getDisplayCards(player.id, 'single', 1)" :key="cardIndex"
@@ -145,7 +145,7 @@
             <div class="cards-section-header">24点</div>
             <div class="cards-grid">
               <div v-for="player in gameStore.players" :key="player.id" class="player-cards">
-                <div class="player-label">{{ player.isAI ? '电脑' + player.id.replace('cpu', '') : '玩家' }}</div>
+                <div class="player-label">{{ player.name }}</div>
                 <div class="player-card">
                   <div class="cards-container">
                     <div v-for="(card, cardIndex) in getDisplayCards(player.id, 'twentyFourPoint', 2)" :key="cardIndex"
@@ -165,7 +165,7 @@
             <div class="cards-section-header">比三张</div>
             <div class="cards-grid">
               <div v-for="player in gameStore.players" :key="player.id" class="player-cards">
-                <div class="player-label">{{ player.isAI ? '电脑' + player.id.replace('cpu', '') : '玩家' }}</div>
+                <div class="player-label">{{ player.name }}</div>
                 <div class="player-card">
                   <div class="cards-container">
                     <div v-for="(card, cardIndex) in getDisplayCards(player.id, 'threeCard', 3)" :key="cardIndex"

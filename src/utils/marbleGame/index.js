@@ -1,4 +1,4 @@
-export { SceneManager } from './SceneManager.js'
+export { SceneManager, GameScene } from './SceneManager.js'
 export { PhysicsManager } from './PhysicsManager.js'
 export { InputManager } from './InputManager.js'
 export { AIPlayer } from './AIPlayer.js'

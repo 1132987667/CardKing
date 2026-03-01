@@ -6,8 +6,8 @@
       <button class="back-btn" @click="backToMenu">返回菜单</button>
       <div class="score-board">分数：{{ score }}</div>
       <div v-if="!isPlaying" class="overlay-panel">
-        <h2>三维方块收集器</h2>
-        <p>使用方向键移动绿色方块，收集红色目标。</p>
+        <h2>方块收集器</h2>
+        <p>使用方向键或WASD移动绿色方块，收集红色目标。</p>
         <button @click="startGame">开始游戏</button>
       </div>
     </div>
@@ -15,8 +15,8 @@
 </template>
 
 <script>
-import { ref, reactive, onMounted, onUnmounted } from 'vue'
-import * as THREE from 'three'
+import { ref, onMounted, onUnmounted } from 'vue'
+import Phaser from 'phaser'
 
 export default {
   name: 'CubeCollectorGame',
@@ -26,213 +26,192 @@ export default {
     const isPlaying = ref(false)
     const canvasContainer = ref(null)
 
-    const keys = reactive({ ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false })
-    const CONFIG = {
-      playerSpeed: 0.12,
-      sceneSize: 10,
-      targetCount: 5
-    }
-
-    let scene = null
-    let camera = null
-    let renderer = null
+    let game = null
+    let gameScene = null
     let player = null
-    let floor = null
-    let animationId = null
-    let targetGeometry = null
-    let targetMaterial = null
-    let playerGeometry = null
-    let playerMaterial = null
-    let floorGeometry = null
-    let floorMaterial = null
-    const targets = []
+    let targets = []
+    let cursors = null
+    let wasd = null
 
-    const spawnOneTarget = () => {
-      if (!scene || !targetGeometry || !targetMaterial) return
-      const mesh = new THREE.Mesh(targetGeometry, targetMaterial)
-      mesh.position.set(
-        (Math.random() - 0.5) * CONFIG.sceneSize * 1.8,
-        0.6,
-        (Math.random() - 0.5) * CONFIG.sceneSize * 1.8
-      )
-      scene.add(mesh)
-      targets.push(mesh)
+    const CONFIG = {
+      playerSpeed: 200,
+      targetCount: 5,
+      playerSize: 40,
+      targetSize: 30
     }
 
-    const spawnTargets = () => {
-      while (targets.length) {
-        const t = targets.pop()
-        scene.remove(t)
+    class MainScene extends Phaser.Scene {
+      constructor () {
+        super({ key: 'MainScene' })
       }
-      for (let i = 0; i < CONFIG.targetCount; i++) {
-        spawnOneTarget()
+
+      preload () {
+        this.createTextures()
       }
-    }
 
-    const onWindowResize = () => {
-      if (!camera || !renderer) return
-      const width = canvasContainer.value?.clientWidth || window.innerWidth
-      const height = canvasContainer.value?.clientHeight || window.innerHeight
-      camera.aspect = width / height
-      camera.updateProjectionMatrix()
-      renderer.setSize(width, height)
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
-    }
+      create () {
+        const { width, height } = this.scale
+        
+        this.add.rectangle(width / 2, height / 2, width, height, 0x101b2f)
 
-    const handleKeyDown = (e) => {
-      if (e.key in keys) keys[e.key] = true
-    }
+        player = this.add.rectangle(width / 2, height / 2, CONFIG.playerSize, CONFIG.playerSize, 0x3ad36b)
+        this.physics.add.existing(player)
+        player.body.setCollideWorldBounds(true)
 
-    const handleKeyUp = (e) => {
-      if (e.key in keys) keys[e.key] = false
-    }
+        targets = []
+        for (let i = 0; i < CONFIG.targetCount; i++) {
+          this.spawnTarget()
+        }
 
-    const checkCollisions = () => {
-      if (!player) return
-      const playerBox = new THREE.Box3().setFromObject(player)
-      for (let i = targets.length - 1; i >= 0; i--) {
-        const target = targets[i]
-        const targetBox = new THREE.Box3().setFromObject(target)
-        if (playerBox.intersectsBox(targetBox)) {
-          scene.remove(target)
-          targets.splice(i, 1)
-          score.value += 10
-          spawnOneTarget()
+        cursors = this.input.keyboard.createCursorKeys()
+        wasd = this.input.keyboard.addKeys({
+          up: Phaser.Input.Keyboard.KeyCodes.W,
+          down: Phaser.Input.Keyboard.KeyCodes.S,
+          left: Phaser.Input.Keyboard.KeyCodes.A,
+          right: Phaser.Input.Keyboard.KeyCodes.D
+        })
+
+        gameScene = this
+        isPlaying.value = true
+      }
+
+      createTextures () {
+        const playerGraphics = this.make.graphics({ x: 0, y: 0, add: false })
+        playerGraphics.fillStyle(0x3ad36b, 1)
+        playerGraphics.fillRect(0, 0, CONFIG.playerSize, CONFIG.playerSize)
+        playerGraphics.generateTexture('player', CONFIG.playerSize, CONFIG.playerSize)
+        playerGraphics.destroy()
+
+        const targetGraphics = this.make.graphics({ x: 0, y: 0, add: false })
+        targetGraphics.fillStyle(0xff4d4d, 1)
+        targetGraphics.fillTriangle(
+          CONFIG.targetSize / 2, 0,
+          0, CONFIG.targetSize,
+          CONFIG.targetSize, CONFIG.targetSize
+        )
+        targetGraphics.generateTexture('target', CONFIG.targetSize, CONFIG.targetSize)
+        targetGraphics.destroy()
+      }
+
+      spawnTarget () {
+        const { width, height } = this.scale
+        const padding = 50
+        const x = Phaser.Math.Between(padding, width - padding)
+        const y = Phaser.Math.Between(padding, height - padding)
+        
+        const target = this.add.rectangle(x, y, CONFIG.targetSize, CONFIG.targetSize, 0xff4d4d)
+        this.physics.add.existing(target)
+        target.body.setImmovable(true)
+        
+        this.tweens.add({
+          targets: target,
+          rotation: Math.PI * 2,
+          duration: 2000,
+          repeat: -1
+        })
+        
+        targets.push(target)
+      }
+
+      update () {
+        if (!player || !isPlaying.value) return
+
+        player.body.setVelocity(0)
+
+        if (cursors.left.isDown || wasd.left.isDown) {
+          player.body.setVelocityX(-CONFIG.playerSpeed)
+        } else if (cursors.right.isDown || wasd.right.isDown) {
+          player.body.setVelocityX(CONFIG.playerSpeed)
+        }
+
+        if (cursors.up.isDown || wasd.up.isDown) {
+          player.body.setVelocityY(-CONFIG.playerSpeed)
+        } else if (cursors.down.isDown || wasd.down.isDown) {
+          player.body.setVelocityY(CONFIG.playerSpeed)
+        }
+
+        for (let i = targets.length - 1; i >= 0; i--) {
+          const target = targets[i]
+          if (Phaser.Geom.Intersects.RectangleToRectangle(player.getBounds(), target.getBounds())) {
+            target.destroy()
+            targets.splice(i, 1)
+            score.value += 10
+            this.spawnTarget()
+          }
+        }
+      }
+
+      resetPlayer () {
+        if (player) {
+          const { width, height } = this.scale
+          player.setPosition(width / 2, height / 2)
+        }
+      }
+
+      resetTargets () {
+        targets.forEach(t => t.destroy())
+        targets = []
+        for (let i = 0; i < CONFIG.targetCount; i++) {
+          this.spawnTarget()
         }
       }
     }
 
-    const animate = () => {
-      if (!isPlaying.value || !scene || !camera || !renderer || !player) return
-
-      animationId = requestAnimationFrame(animate)
-
-      if (keys.ArrowUp) player.position.z -= CONFIG.playerSpeed
-      if (keys.ArrowDown) player.position.z += CONFIG.playerSpeed
-      if (keys.ArrowLeft) player.position.x -= CONFIG.playerSpeed
-      if (keys.ArrowRight) player.position.x += CONFIG.playerSpeed
-
-      player.position.x = THREE.MathUtils.clamp(player.position.x, -CONFIG.sceneSize, CONFIG.sceneSize)
-      player.position.z = THREE.MathUtils.clamp(player.position.z, -CONFIG.sceneSize, CONFIG.sceneSize)
-
-      targets.forEach((t) => {
-        t.rotation.x += 0.02
-        t.rotation.y += 0.02
-      })
-
-      checkCollisions()
-      renderer.render(scene, camera)
-    }
-
-    const initScene = () => {
+    const initGame = () => {
       if (!canvasContainer.value) return
-
-      scene = new THREE.Scene()
-      scene.background = new THREE.Color(0x101b2f)
 
       const width = canvasContainer.value.clientWidth || window.innerWidth
       const height = canvasContainer.value.clientHeight || window.innerHeight
 
-      camera = new THREE.PerspectiveCamera(70, width / height, 0.1, 100)
-      camera.position.set(0, 10, 9)
-      camera.lookAt(0, 0, 0)
+      const config = {
+        type: Phaser.AUTO,
+        width: width,
+        height: height,
+        parent: canvasContainer.value,
+        backgroundColor: '#101b2f',
+        physics: {
+          default: 'arcade',
+          arcade: {
+            debug: false
+          }
+        },
+        scene: MainScene
+      }
 
-      renderer = new THREE.WebGLRenderer({ antialias: true })
-      renderer.setSize(width, height)
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
-      canvasContainer.value.appendChild(renderer.domElement)
-
-      const ambientLight = new THREE.AmbientLight(0xffffff, 0.6)
-      scene.add(ambientLight)
-      const dirLight = new THREE.DirectionalLight(0xffffff, 0.9)
-      dirLight.position.set(4, 10, 6)
-      scene.add(dirLight)
-
-      playerGeometry = new THREE.BoxGeometry(1, 1, 1)
-      playerMaterial = new THREE.MeshStandardMaterial({ color: 0x3ad36b })
-      player = new THREE.Mesh(playerGeometry, playerMaterial)
-      player.position.set(0, 0.5, 0)
-      scene.add(player)
-
-      floorGeometry = new THREE.PlaneGeometry(CONFIG.sceneSize * 2.4, CONFIG.sceneSize * 2.4)
-      floorMaterial = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, side: THREE.DoubleSide })
-      floor = new THREE.Mesh(floorGeometry, floorMaterial)
-      floor.rotation.x = -Math.PI / 2
-      scene.add(floor)
-
-      targetGeometry = new THREE.OctahedronGeometry(0.5)
-      targetMaterial = new THREE.MeshStandardMaterial({ color: 0xff4d4d })
-      spawnTargets()
-
-      window.addEventListener('resize', onWindowResize)
-      window.addEventListener('keydown', handleKeyDown)
-      window.addEventListener('keyup', handleKeyUp)
-
-      renderer.render(scene, camera)
+      game = new Phaser.Game(config)
     }
 
-    const disposeScene = () => {
-      if (animationId) {
-        cancelAnimationFrame(animationId)
-        animationId = null
-      }
+    const disposeGame = () => {
       isPlaying.value = false
-
-      window.removeEventListener('resize', onWindowResize)
-      window.removeEventListener('keydown', handleKeyDown)
-      window.removeEventListener('keyup', handleKeyUp)
-
-      while (targets.length) {
-        const t = targets.pop()
-        scene?.remove(t)
+      if (game) {
+        game.destroy(true)
+        game = null
+        gameScene = null
+        player = null
+        targets = []
       }
-
-      targetGeometry?.dispose()
-      targetMaterial?.dispose()
-      playerGeometry?.dispose()
-      playerMaterial?.dispose()
-      floorGeometry?.dispose()
-      floorMaterial?.dispose()
-
-      if (renderer) {
-        renderer.dispose()
-        if (canvasContainer.value?.contains(renderer.domElement)) {
-          canvasContainer.value.removeChild(renderer.domElement)
-        }
-      }
-
-      scene = null
-      camera = null
-      renderer = null
-      player = null
-      floor = null
-      targetGeometry = null
-      targetMaterial = null
-      playerGeometry = null
-      playerMaterial = null
-      floorGeometry = null
-      floorMaterial = null
     }
 
     const startGame = () => {
       score.value = 0
-      isPlaying.value = true
-      if (player) player.position.set(0, 0.5, 0)
-      spawnTargets()
-      animate()
+      if (gameScene) {
+        gameScene.resetPlayer()
+        gameScene.resetTargets()
+        isPlaying.value = true
+      }
     }
 
     const backToMenu = () => {
-      disposeScene()
+      disposeGame()
       emit('back-to-menu')
     }
 
     onMounted(() => {
-      initScene()
+      initGame()
     })
 
     onUnmounted(() => {
-      disposeScene()
+      disposeGame()
     })
 
     return {

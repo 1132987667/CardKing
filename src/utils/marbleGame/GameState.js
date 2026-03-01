@@ -1,4 +1,5 @@
 import { reactive } from 'vue'
+import { getNextCPUName } from '../cpuNames.js'
 
 export const GamePhase = {
   MENU: 'MENU',
@@ -28,14 +29,14 @@ export function createGameState() {
     
     players: [
       { id: 0, name: '玩家', color: 0xe74c3c, status: PlayerStatus.NORMAL, holesOccupied: [], canAttack: false, finished: false },
-      { id: 1, name: '电脑', color: 0x3498db, status: PlayerStatus.NORMAL, holesOccupied: [], canAttack: false, finished: false }
+      { id: 1, name: getNextCPUName(), color: 0x3498db, status: PlayerStatus.NORMAL, holesOccupied: [], canAttack: false, finished: false }
     ],
     
     holes: [
-      { id: 0, x: 0, z: -5, radius: 1.2, occupiedBy: null, isFinish: false, order: 1 },
-      { id: 1, x: 0, z: -12, radius: 1.0, occupiedBy: null, isFinish: false, order: 2 },
-      { id: 2, x: 0, z: -19, radius: 1.0, occupiedBy: null, isFinish: false, order: 3 },
-      { id: 3, x: 0, z: -26, radius: 1.5, occupiedBy: null, isFinish: true, order: 4 }
+      { id: 0, x: 400, z: 150, radius: 40, occupiedBy: null, isFinish: false, order: 1 },
+      { id: 1, x: 400, z: 280, radius: 35, occupiedBy: null, isFinish: false, order: 2 },
+      { id: 2, x: 400, z: 410, radius: 35, occupiedBy: null, isFinish: false, order: 3 },
+      { id: 3, x: 400, z: 540, radius: 50, occupiedBy: null, isFinish: true, order: 4 }
     ],
     
     qualifyingResults: [],

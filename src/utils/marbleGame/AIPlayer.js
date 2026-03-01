@@ -1,9 +1,7 @@
-import * as THREE from 'three'
-
 export class AIPlayer {
-  constructor(gameState, physicsManager) {
+  constructor(gameState, sceneManager) {
     this.gameState = gameState
-    this.physicsManager = physicsManager
+    this.sceneManager = sceneManager
     this.thinkingTime = 1500
     this.accuracy = 0.7
     this.powerVariance = 0.15
@@ -23,7 +21,7 @@ export class AIPlayer {
       return null
     }
 
-    const ballPos = this.physicsManager.getBallPosition(player.id)
+    const ballPos = this.sceneManager.getBallPosition(player.id)
     if (!ballPos) {
       this.gameState.isAIThinking = false
       return null
@@ -41,12 +39,14 @@ export class AIPlayer {
   }
 
   calculateShot(ballPos, targetHole) {
-    const targetPos = new THREE.Vector3(targetHole.x, 0, targetHole.z)
-    const direction = new THREE.Vector3().subVectors(targetPos, ballPos)
-    direction.y = 0
+    const targetPos = { x: targetHole.x, y: targetHole.z }
+    const dx = targetPos.x - ballPos.x
+    const dy = targetPos.y - ballPos.y
     
-    const distance = direction.length()
-    direction.normalize()
+    const distance = Math.sqrt(dx * dx + dy * dy)
+    
+    const dirX = distance > 0 ? dx / distance : 0
+    const dirY = distance > 0 ? dy / distance : 0
 
     const idealPower = this.calculateIdealPower(distance)
     
@@ -55,23 +55,23 @@ export class AIPlayer {
     
     const angleOffset = (Math.random() - 0.5) * (1 - this.accuracy) * 0.3
     
-    direction.x = direction.x * Math.cos(angleOffset) - direction.z * Math.sin(angleOffset)
-    direction.z = direction.x * Math.sin(angleOffset) + direction.z * Math.cos(angleOffset)
-    direction.normalize()
+    const cosOffset = Math.cos(angleOffset)
+    const sinOffset = Math.sin(angleOffset)
+    const newDirX = dirX * cosOffset - dirY * sinOffset
+    const newDirY = dirX * sinOffset + dirY * cosOffset
 
     const finalPower = idealPower * powerVariation * accuracyFactor
 
     return {
-      x: direction.x * finalPower,
-      y: 0,
-      z: direction.z * finalPower,
+      x: newDirX * finalPower,
+      y: newDirY * finalPower,
       magnitude: finalPower
     }
   }
 
   calculateIdealPower(distance) {
     const frictionFactor = 0.8
-    const basePower = distance * 1.5
+    const basePower = distance * 0.05
     return basePower / frictionFactor
   }
 
@@ -107,32 +107,34 @@ export class AIPlayer {
     await this.delay(this.thinkingTime)
 
     const target = targets[Math.floor(Math.random() * targets.length)]
-    const ballPos = this.physicsManager.getBallPosition(player.id)
-    const targetBallPos = this.physicsManager.getBallPosition(target.id)
+    const ballPos = this.sceneManager.getBallPosition(player.id)
+    const targetBallPos = this.sceneManager.getBallPosition(target.id)
 
     if (!ballPos || !targetBallPos) {
       this.gameState.isAIThinking = false
       return null
     }
 
-    const direction = new THREE.Vector3().subVectors(targetBallPos, ballPos)
-    direction.y = 0
-    const distance = direction.length()
-    direction.normalize()
+    const dx = targetBallPos.x - ballPos.x
+    const dy = targetBallPos.y - ballPos.y
+    const distance = Math.sqrt(dx * dx + dy * dy)
+    
+    const dirX = distance > 0 ? dx / distance : 0
+    const dirY = distance > 0 ? dy / distance : 0
 
-    const power = Math.min(distance * 2, 15)
+    const power = Math.min(distance * 0.08, 8)
     
     const angleOffset = (Math.random() - 0.5) * 0.2
-    direction.x = direction.x * Math.cos(angleOffset) - direction.z * Math.sin(angleOffset)
-    direction.z = direction.x * Math.sin(angleOffset) + direction.z * Math.cos(angleOffset)
-    direction.normalize()
+    const cosOffset = Math.cos(angleOffset)
+    const sinOffset = Math.sin(angleOffset)
+    const newDirX = dirX * cosOffset - dirY * sinOffset
+    const newDirY = dirX * sinOffset + dirY * cosOffset
 
     this.gameState.isAIThinking = false
 
     return {
-      x: direction.x * power,
-      y: 0,
-      z: direction.z * power,
+      x: newDirX * power,
+      y: newDirY * power,
       magnitude: power,
       isAttack: true,
       targetId: target.id

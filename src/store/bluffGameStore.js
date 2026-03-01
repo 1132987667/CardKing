@@ -1,6 +1,7 @@
 import { reactive } from 'vue'
 import Card from '../utils/Card.js'
 import { Suit, RANK_PRIORITY, SUIT_PRIORITY } from '../utils/constants.js'
+import { getCPUNames } from '../utils/cpuNames.js'
 
 /**
  * 吹牛皮游戏状态管理
@@ -102,11 +103,12 @@ const bluffGameStore = reactive({
     }
 
     // 创建玩家 (1人类 + 3AI)
+    const cpuNames = getCPUNames(3)
     this.players = [
       { id: 'player', name: '玩家', isAI: false, hand: [], cardCount: 0 },
-      { id: 'cpu1', name: '电脑1', isAI: true, hand: [], cardCount: 0 },
-      { id: 'cpu2', name: '电脑2', isAI: true, hand: [], cardCount: 0 },
-      { id: 'cpu3', name: '电脑3', isAI: true, hand: [], cardCount: 0 },
+      { id: 'cpu1', name: cpuNames[0], isAI: true, hand: [], cardCount: 0 },
+      { id: 'cpu2', name: cpuNames[1], isAI: true, hand: [], cardCount: 0 },
+      { id: 'cpu3', name: cpuNames[2], isAI: true, hand: [], cardCount: 0 },
     ]
 
     // 生成并洗牌

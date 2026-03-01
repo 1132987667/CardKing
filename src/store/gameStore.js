@@ -2,6 +2,7 @@ import Deck from '../utils/Deck.js'
 import AIPlayer from '../utils/AIPlayer.js'
 import RuleEvaluator from '../utils/RuleEvaluator.js'
 import { reactive, readonly } from 'vue'
+import { getCPUNames } from '../utils/cpuNames.js'
 
 const state = reactive({
   gameType: 'tripleCard',
@@ -142,8 +143,9 @@ class GameStore {
 
     state.players.push({ id: 'player', name: '玩家', isAI: false })
 
+    const cpuNames = getCPUNames(playerCount - 1)
     for (let i = 1; i < playerCount; i++) {
-      state.players.push({ id: `cpu${i}`, name: `电脑${i}`, isAI: true })
+      state.players.push({ id: `cpu${i}`, name: cpuNames[i - 1], isAI: true })
     }
 
     state.players.forEach(p => {

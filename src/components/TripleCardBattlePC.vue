@@ -201,7 +201,7 @@
               :key="player.id" 
               class="result-item"
             >
-              <span class="result-name">{{ player.isAI ? '电脑' + player.id.replace('cpu', '') : '玩家' }}</span>
+              <span class="result-name">{{ player.name }}</span>
               <span class="result-score">+{{ gameStore.roundScores[player.id] || 0 }}</span>
               <span class="result-total">{{ gameStore.totalScores[player.id] || 0 }}</span>
             </div>
